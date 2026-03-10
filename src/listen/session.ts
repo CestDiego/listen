@@ -10,6 +10,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { dirname } from "path";
 import type { GateResult, AnalysisResult } from "./config";
 import type { WatchlistMatch } from "./watchlist";
+import type { IntentVectorSnapshot } from "./intent-vector";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -133,6 +134,8 @@ export class SessionStore {
   private savePath: string;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private subscribers: Set<SSESubscriber> = new Set();
+  private intentVector: IntentVectorSnapshot | null = null;
+  private intentVectorHistory: IntentVectorSnapshot[] = [];
 
   constructor(savePath: string, config: Record<string, unknown>) {
     this.savePath = savePath;
@@ -350,6 +353,13 @@ export class SessionStore {
     this.debounceSave();
   }
 
+  /** Store and broadcast an intent vector snapshot. */
+  emitIntentVector(snapshot: IntentVectorSnapshot, history: IntentVectorSnapshot[]): void {
+    this.intentVector = snapshot;
+    this.intentVectorHistory = history;
+    this.notify("intentVector", { snapshot, history });
+  }
+
   /** Correct a transcription. Returns true if found. */
   correct(entryId: string, correctedText: string): boolean {
     const entry = this.session.timeline.find((e) => e.id === entryId);
@@ -371,8 +381,12 @@ export class SessionStore {
   }
 
   /** Get the full session data (for API / dashboard). */
-  getSession(): Session {
-    return this.session;
+  getSession(): Session & { intentVector?: IntentVectorSnapshot | null; intentVectorHistory?: IntentVectorSnapshot[] } {
+    return {
+      ...this.session,
+      intentVector: this.intentVector,
+      intentVectorHistory: this.intentVectorHistory,
+    };
   }
 
   /** Get a slice of the timeline. */
@@ -436,6 +450,7 @@ export class SessionStore {
       escalationRate: decisions.length > 0
         ? Number((decisions.filter((d) => d.escalated).length / decisions.length * 100).toFixed(1))
         : 0,
+      intentVector: this.intentVector,
     };
   }
 

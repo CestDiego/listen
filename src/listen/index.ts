@@ -28,6 +28,7 @@ import { notify } from "./notifier";
 import { EventEmitter } from "./events";
 import { respondToSkill } from "./responder";
 import { SessionStore } from "./session";
+import { IntentVectorStore } from "./intent-vector";
 import { startDashboard, type TranscriptPost } from "./dashboard";
 import {
   SkillRegistry,
@@ -98,10 +99,13 @@ async function initSystems(
   activeSession = session;
   console.log(`  💾 session → ${sessionPath}`);
 
+  // Intent vector engine (multi-dimensional activation tracking)
+  const intentVector = new IntentVectorStore();
+
   // Web dashboard (SSE live updates + optional transcript POST handler)
   startDashboard(session, onTranscript);
 
-  return { registry, events, session };
+  return { registry, events, session, intentVector };
 }
 
 /**
@@ -123,6 +127,7 @@ async function processTranscript(
   registry: SkillRegistry,
   events: EventEmitter,
   session: SessionStore,
+  intentVector: IntentVectorStore,
   config: ListenConfig,
   cycleLabel: string
 ): Promise<void> {
@@ -175,6 +180,15 @@ async function processTranscript(
     voice: s.voice,
     agoSeconds: Math.round((Date.now() - s.timestamp.getTime()) / 1000),
   }));
+
+  // 5b. Update intent vector from classify results
+  const vectorInputs = result.experts.map(e => ({
+    skill: e.skill,
+    match: e.match,
+    confidence: e.confidence,
+  }));
+  const vectorSnapshot = intentVector.update(vectorInputs);
+  session.emitIntentVector(vectorSnapshot, intentVector.history());
 
   // 6. Record the full decision with per-expert breakdown
   const decision = session.addRouterDecision({
@@ -428,7 +442,7 @@ function printBanner(config: ListenConfig): void {
 async function runLiveMode(config: ListenConfig): Promise<void> {
   await initRecorder(config);
   const buffer = new TranscriptBuffer(config.bufferMinutes);
-  const { registry, events, session } = await initSystems(config);
+  const { registry, events, session, intentVector } = await initSystems(config);
 
   let cycle = 0;
 
@@ -477,6 +491,7 @@ async function runLiveMode(config: ListenConfig): Promise<void> {
         registry,
         events,
         session,
+        intentVector,
         config,
         cycleLabel
       );
@@ -534,6 +549,7 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
       registry,
       events,
       session,
+      intentVector,
       config,
       cycleLabel
     );
@@ -547,7 +563,7 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
   };
 
   // Init systems with the serialized transcript callback
-  const { registry, events, session } = await initSystems(config, serialOnTranscript);
+  const { registry, events, session, intentVector } = await initSystems(config, serialOnTranscript);
 
   // Mark ready — safe to process transcripts now that all systems are initialized
   ready = true;
@@ -574,7 +590,7 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
 
 async function runPipeMode(config: ListenConfig): Promise<void> {
   const buffer = new TranscriptBuffer(config.bufferMinutes);
-  const { registry, events, session } = await initSystems(config);
+  const { registry, events, session, intentVector } = await initSystems(config);
 
   console.log(
     "  📋 pipe mode — paste transcript, press Enter, Ctrl+D to finish."
@@ -613,6 +629,7 @@ async function runPipeMode(config: ListenConfig): Promise<void> {
       registry,
       events,
       session,
+      intentVector,
       config,
       "     "
     );
@@ -628,6 +645,7 @@ async function runPipeMode(config: ListenConfig): Promise<void> {
       registry,
       events,
       session,
+      intentVector,
       config,
       "     "
     );

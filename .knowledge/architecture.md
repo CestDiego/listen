@@ -138,3 +138,67 @@ CURRENT (unified multi-tool):
   as a fallback. Per-skill adapters remain in `models/music/` and `models/wellbeing/`.
 - `serve_multitool.py` exposes the same `/v1/classify` API — the Bun client
   (`classify.ts`) needs zero code changes.
+
+---
+
+## Intent Vector (Real-Time State Observability)
+
+### Overview
+A multi-dimensional activation vector that decays over time, tracking user intent
+signals derived from classifier outputs. Visualized live in the dashboard's
+"Intent" tab with a radar chart and sparkline traces.
+
+### Architecture
+```
+Transcript → classifyTranscript() → expertResults[]
+                                          ↓
+                                   IntentVectorStore.update()
+                                     ├─ Decay all dimensions (exponential half-life)
+                                     ├─ Apply expert match activations (max, not replace)
+                                     ├─ Compute engagement (chunk density in 60s window)
+                                     ├─ Compute taskFocus (match ratio in 30s window)
+                                     ├─ Compute trends (Δ vs 10s-ago snapshot)
+                                     └─ Push to ring buffer (300 slots ≈ 5 min)
+                                          ↓
+                                   session.emitIntentVector(snapshot, history)
+                                          ↓
+                                   SSE "intentVector" → Dashboard
+                                     ├─ Radar chart (Canvas API, 4 axes)
+                                     ├─ Dimension readouts (bars + trend arrows)
+                                     └─ Sparkline traces (per-dimension, 5 min)
+```
+
+### Dimensions (Phase 1)
+
+| Dimension | Range | Decay Half-Life | Source |
+|-----------|-------|-----------------|--------|
+| `music` | [0, 1] | 45s | Classifier confidence (0.95 on match) |
+| `wellbeing` | [0, 1] | 120s | Classifier confidence (0.83-0.95 on match) |
+| `engagement` | [0, 1] | 60s | Chunks in last 60s / 12 (max expected) |
+| `taskFocus` | [0, 1] | 30s | Ratio of skill-matched chunks in last 30s |
+
+### Key Design Decisions
+- **Decay function**: `baseline + (value - baseline) * 0.5^(elapsed / halfLife)`
+- **Max-not-replace**: activation uses `Math.max(current, confidence)` so rapid
+  re-triggers don't lower an already-high signal
+- **Ring buffer**: fixed 300 slots with head pointer, O(1) push, ordered materialization
+- **Trends**: compare current vs ~10s-ago snapshot, clamped to [-1, 1]
+- **SSE event**: `"intentVector"` with `{ snapshot, history }` — full history sent
+  each time so dashboard can redraw sparklines from any reconnect point
+
+### Files
+- `src/listen/intent-vector.ts` — IntentVectorStore class, decay function, types
+- `src/listen/index.ts` — wired after classify, before addRouterDecision
+- `src/listen/session.ts` — emitIntentVector() method, included in getSession()/getStats()
+- `src/listen/dashboard.ts` — "Intent" tab with radar chart + sparklines
+- `scripts/inject-test.ts` — test injection script (9 transcripts, timed sequence)
+
+### Testing
+Run `bun run scripts/inject-test.ts` to inject a scripted sequence that exercises
+all dimensions: music commands, wellbeing triggers, neutral text, and decay pauses.
+Requires `./start.sh` or manual pipeline + expert server startup.
+
+### Future Phases
+- **Phase 2**: Add `mood` (sentiment), `energy` (speech rate) dimensions via heuristics
+- **Phase 3**: Train tiny LoRA classifiers for important dimensions
+- **Phase 4**: Explore steering vectors from model activations (see `.knowledge/intent-vectors.md`)

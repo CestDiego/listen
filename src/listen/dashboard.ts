@@ -436,6 +436,73 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     color: var(--muted); padding: 4px 0;
   }
   .stats-row .sep { color: var(--border); }
+
+  /* ── Intent Vector Panel ─────────────────────────────────── */
+  #intent-panel {
+    max-width: 960px; margin: 0 auto; padding: 16px 20px;
+  }
+  .intent-layout {
+    display: grid; grid-template-columns: 280px 1fr; gap: 20px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 700px) {
+    .intent-layout { grid-template-columns: 1fr; }
+  }
+  .radar-container {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .radar-container canvas {
+    background: var(--surface); border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .dimension-readouts {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .dim-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 6px;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .dim-label {
+    font-size: 11px; color: var(--muted); width: 80px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .dim-bar {
+    flex: 1; height: 8px; border-radius: 4px;
+    background: var(--border); overflow: hidden;
+  }
+  .dim-fill {
+    height: 100%; border-radius: 4px;
+    transition: width 0.4s ease-out;
+  }
+  .dim-value {
+    font-size: 12px; font-weight: 600; width: 36px; text-align: right;
+  }
+  .dim-trend {
+    font-size: 12px; width: 16px; text-align: center;
+  }
+  .sparkline-section {
+    margin-top: 16px;
+  }
+  .sparkline-section h3 {
+    font-size: 12px; color: var(--muted); margin-bottom: 8px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .sparkline-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+  }
+  .sparkline-label {
+    font-size: 10px; color: var(--muted); width: 70px;
+    text-transform: uppercase;
+  }
+  .sparkline-canvas {
+    background: var(--surface); border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .intent-empty {
+    text-align: center; color: var(--muted); padding: 60px 20px;
+  }
+  .intent-empty h2 { font-size: 16px; margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -458,6 +525,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div class="tabs">
     <button class="tab active" data-tab="timeline">Timeline</button>
     <button class="tab" data-tab="decisions">Decisions <span class="tab-badge" id="decisions-count">0</span></button>
+    <button class="tab" data-tab="intent">Intent</button>
   </div>
 </header>
 
@@ -489,6 +557,28 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     </div>
     <div id="decisions-list">
       <div class="decision-empty">No router decisions yet. Speak and they'll appear here.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Intent Vector Panel -->
+<div class="tab-panel" id="panel-intent">
+  <div id="intent-panel">
+    <div class="intent-layout">
+      <div class="radar-container">
+        <canvas id="radar-chart" width="260" height="260"></canvas>
+      </div>
+      <div>
+        <div class="dimension-readouts" id="dim-readouts"></div>
+        <div class="sparkline-section">
+          <h3>Traces (last 5 min)</h3>
+          <div id="sparklines"></div>
+        </div>
+      </div>
+    </div>
+    <div class="intent-empty" id="intent-empty">
+      <h2>no intent data yet</h2>
+      <p>Intent vector will appear here as transcripts are processed.</p>
     </div>
   </div>
 </div>
@@ -831,6 +921,210 @@ document.getElementById('filter-interest').addEventListener('input', (e) => {
 document.getElementById('filter-skill').addEventListener('change', renderDecisionsList);
 document.getElementById('filter-show').addEventListener('change', renderDecisionsList);
 
+// ── Intent Vector ─────────────────────────────────────────────
+const DIMS = ['music', 'wellbeing', 'engagement', 'taskFocus'];
+const DIM_COLORS = {
+  music: '#58a6ff',      // accent blue
+  wellbeing: '#f85149',  // red
+  engagement: '#3fb950', // green
+  taskFocus: '#d29922',  // yellow
+};
+const DIM_LABELS = {
+  music: 'music',
+  wellbeing: 'wellbeing',
+  engagement: 'engage',
+  taskFocus: 'focus',
+};
+
+let intentHistory = [];
+let currentIntent = null;
+
+// -- Radar chart -------------------------------------------------------
+const radarCanvas = document.getElementById('radar-chart');
+const radarCtx = radarCanvas.getContext('2d');
+
+function drawRadar(dims) {
+  const W = radarCanvas.width;
+  const H = radarCanvas.height;
+  const cx = W / 2;
+  const cy = H / 2;
+  const R = Math.min(cx, cy) - 30;
+  const n = DIMS.length;
+
+  radarCtx.clearRect(0, 0, W, H);
+
+  // Grid rings (0.25, 0.5, 0.75, 1.0)
+  radarCtx.strokeStyle = '#30363d';
+  radarCtx.lineWidth = 1;
+  for (let ring = 0.25; ring <= 1; ring += 0.25) {
+    radarCtx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const angle = (Math.PI * 2 * (i % n)) / n - Math.PI / 2;
+      const x = cx + R * ring * Math.cos(angle);
+      const y = cy + R * ring * Math.sin(angle);
+      if (i === 0) radarCtx.moveTo(x, y);
+      else radarCtx.lineTo(x, y);
+    }
+    radarCtx.stroke();
+  }
+
+  // Axis lines + labels
+  radarCtx.font = '11px "Berkeley Mono", "SF Mono", monospace';
+  radarCtx.fillStyle = '#7d8590';
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    const lx = cx + R * Math.cos(angle);
+    const ly = cy + R * Math.sin(angle);
+    radarCtx.beginPath();
+    radarCtx.moveTo(cx, cy);
+    radarCtx.lineTo(lx, ly);
+    radarCtx.stroke();
+
+    // Label
+    const labelR = R + 16;
+    const tx = cx + labelR * Math.cos(angle);
+    const ty = cy + labelR * Math.sin(angle);
+    radarCtx.textAlign = Math.abs(Math.cos(angle)) < 0.01 ? 'center' : (Math.cos(angle) > 0 ? 'left' : 'right');
+    radarCtx.textBaseline = Math.abs(Math.sin(angle)) < 0.01 ? 'middle' : (Math.sin(angle) > 0 ? 'top' : 'bottom');
+    radarCtx.fillText(DIM_LABELS[DIMS[i]], tx, ty);
+  }
+
+  if (!dims) return;
+
+  // Filled polygon
+  radarCtx.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const angle = (Math.PI * 2 * (i % n)) / n - Math.PI / 2;
+    const val = dims[DIMS[i % n]] || 0;
+    const x = cx + R * val * Math.cos(angle);
+    const y = cy + R * val * Math.sin(angle);
+    if (i === 0) radarCtx.moveTo(x, y);
+    else radarCtx.lineTo(x, y);
+  }
+  radarCtx.fillStyle = 'rgba(88, 166, 255, 0.15)';
+  radarCtx.fill();
+  radarCtx.strokeStyle = '#58a6ff';
+  radarCtx.lineWidth = 2;
+  radarCtx.stroke();
+
+  // Points
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    const val = dims[DIMS[i]] || 0;
+    const x = cx + R * val * Math.cos(angle);
+    const y = cy + R * val * Math.sin(angle);
+    radarCtx.beginPath();
+    radarCtx.arc(x, y, 4, 0, Math.PI * 2);
+    radarCtx.fillStyle = DIM_COLORS[DIMS[i]];
+    radarCtx.fill();
+    radarCtx.strokeStyle = '#0d1117';
+    radarCtx.lineWidth = 1.5;
+    radarCtx.stroke();
+  }
+}
+
+// -- Dimension readouts ------------------------------------------------
+const readoutsContainer = document.getElementById('dim-readouts');
+function renderReadouts(dims, trends) {
+  readoutsContainer.innerHTML = '';
+  DIMS.forEach(key => {
+    const val = dims ? (dims[key] || 0) : 0;
+    const trend = trends ? (trends[key] || 0) : 0;
+    const trendArrow = trend > 0.05 ? '↑' : (trend < -0.05 ? '↓' : '→');
+    const trendColor = trend > 0.05 ? 'var(--green)' : (trend < -0.05 ? 'var(--red)' : 'var(--muted)');
+    const pct = Math.min(100, val * 100);
+    const color = DIM_COLORS[key];
+
+    const row = document.createElement('div');
+    row.className = 'dim-row';
+    row.innerHTML =
+      '<span class="dim-label">' + DIM_LABELS[key] + '</span>' +
+      '<div class="dim-bar"><div class="dim-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+      '<span class="dim-value" style="color:' + color + '">' + val.toFixed(2) + '</span>' +
+      '<span class="dim-trend" style="color:' + trendColor + '">' + trendArrow + '</span>';
+    readoutsContainer.appendChild(row);
+  });
+}
+
+// -- Sparklines --------------------------------------------------------
+const sparklinesContainer = document.getElementById('sparklines');
+
+function renderSparklines(history) {
+  sparklinesContainer.innerHTML = '';
+  if (!history || history.length < 2) return;
+
+  const W = 500;
+  const H = 28;
+
+  DIMS.forEach(key => {
+    const row = document.createElement('div');
+    row.className = 'sparkline-row';
+
+    const label = document.createElement('span');
+    label.className = 'sparkline-label';
+    label.textContent = DIM_LABELS[key];
+    row.appendChild(label);
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'sparkline-canvas';
+    canvas.width = W;
+    canvas.height = H;
+    row.appendChild(canvas);
+    sparklinesContainer.appendChild(row);
+
+    const ctx = canvas.getContext('2d');
+    const values = history.map(s => s.dimensions[key] || 0);
+
+    // Fill area
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let i = 0; i < values.length; i++) {
+      const x = (i / (values.length - 1)) * W;
+      const y = H - values[i] * (H - 2);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fillStyle = DIM_COLORS[key].replace(')', ', 0.12)').replace('rgb', 'rgba').replace('#', '');
+    // Hex to rgba fill
+    const hex = DIM_COLORS[key];
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',0.12)';
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    for (let i = 0; i < values.length; i++) {
+      const x = (i / (values.length - 1)) * W;
+      const y = H - values[i] * (H - 2);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = DIM_COLORS[key];
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+}
+
+// -- Update intent display ----------------------------------------------
+function updateIntent(snapshot, history) {
+  const emptyEl = document.getElementById('intent-empty');
+  if (snapshot) {
+    if (emptyEl) emptyEl.style.display = 'none';
+    currentIntent = snapshot;
+    intentHistory = history || intentHistory;
+    drawRadar(snapshot.dimensions);
+    renderReadouts(snapshot.dimensions, snapshot.trends);
+    renderSparklines(intentHistory);
+  }
+}
+
+// Draw initial empty radar
+drawRadar(null);
+renderReadouts(null, null);
+
 // ── SSE Connection ─────────────────────────────────────────────
 const evtSource = new EventSource('/events');
 
@@ -859,6 +1153,11 @@ evtSource.addEventListener('init', (e) => {
       document.getElementById('filter-skill').appendChild(opt);
     });
     renderDecisionsList();
+  }
+
+  // Load intent vector state
+  if (session.intentVector) {
+    updateIntent(session.intentVector, session.intentVectorHistory || []);
   }
 });
 
@@ -902,6 +1201,11 @@ evtSource.addEventListener('analysis', (e) => {
 evtSource.addEventListener('correction', (e) => {
   const data = JSON.parse(e.data);
   addEventToEntry(data.entryId, data);
+});
+
+evtSource.addEventListener('intentVector', (e) => {
+  const data = JSON.parse(e.data);
+  updateIntent(data.snapshot, data.history);
 });
 
 evtSource.addEventListener('stats', (e) => {
