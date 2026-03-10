@@ -14,9 +14,12 @@
     "experts:train:music": "cd experts && uv run python3 -m experts.train --skill music",
     "experts:train:wellbeing": "cd experts && uv run python3 -m experts.train --skill wellbeing",
     "listen:menubar:build": "cd src/listen/menubar && xcodebuild -scheme ListenMenuBar -destination 'platform=macOS' build 2>&1 | tail -5",
-    "listen:menubar:copy": "cp $(find ~/Library/Developer/Xcode/DerivedData/menubar-*/Build/Products/Debug/ListenMenuBar -maxdepth 0 2>/dev/null | head -1) ./bin/ListenMenuBar && echo 'Copied to ./bin/ListenMenuBar'"
+    "listen:menubar:copy": "cp $(find ~/Library/Developer/Xcode/DerivedData/menubar-*/Build/Products/Debug/ListenMenuBar -maxdepth 0 2>/dev/null | head -1) ./bin/ListenMenuBar && echo 'Copied to ./bin/ListenMenuBar'",
+    "download-playlists": "bun run scripts/download-playlists.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "yaml": "^2.8.2"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   }

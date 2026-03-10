@@ -1,0 +1,50 @@
+# Mood Accommodator — Playlist Sources
+# Each quadrant lists YouTube URLs and/or search queries.
+# Run: bun run scripts/download-playlists.ts
+
+uplift:
+  description: "Upbeat, energetic, happy — for lifting mood with high energy"
+  urls: []
+  queries:
+    - "ytsearch10:upbeat happy instrumental music"
+    - "ytsearch10:feel good energy boost instrumental"
+    - "ytsearch5:uplifting motivational background music"
+
+release:
+  description: "Intense, cathartic, driving — for channeling negative energy"
+  urls: []
+  queries:
+    - "ytsearch10:intense cathartic instrumental music"
+    - "ytsearch10:epic dramatic orchestral music"
+    - "ytsearch5:powerful emotional cinematic music"
+
+calm:
+  description: "Ambient, peaceful, content — for maintaining positive low-energy state"
+  urls: []
+  queries:
+    - "ytsearch10:peaceful ambient music nature"
+    - "ytsearch10:gentle acoustic guitar instrumental relaxing"
+    - "ytsearch5:calm piano music peaceful meditation"
+
+comfort:
+  description: "Gentle, warm, soothing — for acknowledging and easing sadness"
+  urls: []
+  queries:
+    - "ytsearch10:warm soothing comfort music"
+    - "ytsearch10:gentle healing ambient music"
+    - "ytsearch5:soft melancholy piano beautiful"
+
+focus:
+  description: "Lo-fi, minimal, steady — for deep work and concentration"
+  urls: []
+  queries:
+    - "ytsearch10:lofi hip hop beats study"
+    - "ytsearch10:focus music minimal ambient work"
+    - "ytsearch5:deep concentration music instrumental"
+
+neutral:
+  description: "Subtle ambient — barely noticeable background fill"
+  urls: []
+  queries:
+    - "ytsearch10:ambient background music subtle minimal"
+    - "ytsearch5:soft drone ambient textures"
