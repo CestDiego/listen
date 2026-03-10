@@ -1,14 +1,14 @@
 /**
  * Skills — pluggable action modules for the listen pipeline.
  *
- * Each skill self-describes its capabilities. The router uses these
- * descriptions to classify transcripts in a single LLM call.
+ * Each skill self-describes its capabilities. The classifier broadcasts
+ * transcripts to per-skill MLX experts in parallel via Promise.all.
  *
  * To add a new skill:
  *   1. Create a new file in this directory (e.g. notes.ts)
  *   2. Export a Skill object
  *   3. Add it to DEFAULT_SKILLS below
- *   4. The router prompt updates automatically
+ *   4. Train an expert: cd experts && uv run generate <skill> && uv run train <skill>
  */
 
 export type {
@@ -20,10 +20,12 @@ export type {
   SkillExecution,
   RouterResult,
   RouterContext,
+  ExpertClassification,
+  ClassifyResult,
 } from "./types";
 
 export { SkillRegistry } from "./registry";
-export { routeTranscript } from "./router";
+export { classifyTranscript } from "./classify";
 export { wellbeingSkill } from "./wellbeing";
 export { musicSkill } from "./music";
 

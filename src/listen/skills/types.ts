@@ -107,6 +107,9 @@ export interface SkillExecution {
   timestamp: Date;
 }
 
+/** Per-expert classification result (re-exported from classify.ts for convenience). */
+export type { ExpertClassification, ClassifyResult } from "./classify";
+
 export interface RouterContext {
   /** The transcript chunk that triggered routing */
   transcript: string;

@@ -10,6 +10,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BINARY="$SCRIPT_DIR/bin/ListenMenuBar"
+APP_BUNDLE="$SCRIPT_DIR/bin/ListenMenuBar.app"
 PORT=3838
 EXPERT_PORT=8234
 EXPERTS_DIR="$SCRIPT_DIR/experts"
@@ -71,18 +72,61 @@ if [ "$1" = "--build" ]; then
         mkdir -p "$SCRIPT_DIR/bin"
         BUILT=$(find ~/Library/Developer/Xcode/DerivedData/menubar-*/Build/Products/Debug/ListenMenuBar -maxdepth 0 2>/dev/null | head -1)
         if [ -n "$BUILT" ]; then
-            cp "$BUILT" "$BINARY"
-            # Sign with entitlements for MusicKit + audio input
+            # Create a proper .app bundle (required for MusicKit entitlements)
+            APP_BUNDLE="$SCRIPT_DIR/bin/ListenMenuBar.app"
             ENTITLEMENTS="$SCRIPT_DIR/src/listen/menubar/ListenMenuBar.entitlements"
+            BUNDLE_ID="com.diegoberrocal.listen"
+            TEAM_ID="3RRKS7B95Y"
+
+            rm -rf "$APP_BUNDLE"
+            mkdir -p "$APP_BUNDLE/Contents/MacOS"
+
+            # Info.plist with bundle identifier for MusicKit
+            cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>${BUNDLE_ID}</string>
+    <key>CFBundleName</key>
+    <string>ListenMenuBar</string>
+    <key>CFBundleExecutable</key>
+    <string>ListenMenuBar</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Listen uses your microphone to transcribe speech locally.</string>
+</dict>
+</plist>
+PLIST
+
+            cp "$BUILT" "$APP_BUNDLE/Contents/MacOS/ListenMenuBar"
+
+            # Sign the .app bundle with entitlements
             if [ -f "$ENTITLEMENTS" ]; then
-                codesign --force --sign "Apple Development" --entitlements "$ENTITLEMENTS" "$BINARY" 2>&1
+                codesign --force --deep --sign "Apple Development: Diego Berrocal (F82J865H77)" \
+                    --identifier "$BUNDLE_ID" \
+                    --entitlements "$ENTITLEMENTS" \
+                    "$APP_BUNDLE" 2>&1
                 if [ $? -eq 0 ]; then
-                    ok "signed with MusicKit entitlements"
+                    ok "signed .app bundle with MusicKit entitlements"
                 else
-                    warn "codesign failed — MusicKit catalog playback may not work"
+                    warn "codesign failed — falling back to ad-hoc (MusicKit catalog playback disabled)"
+                    codesign --force --deep --sign - "$APP_BUNDLE" 2>&1
                 fi
             fi
-            ok "binary copied to bin/ListenMenuBar"
+
+            # Also keep the bare binary for backward compat
+            cp "$BUILT" "$BINARY"
+
+            ok "built bin/ListenMenuBar.app"
         else
             err "could not find built binary in DerivedData"
             exit 1
@@ -173,8 +217,19 @@ ok "bun server ready on :$PORT"
 
 # ── Start menu bar app ─────────────────────────────────────────────
 info "starting menu bar app..."
-"$BINARY" &
-MENUBAR_PID=$!
+if [ -d "$APP_BUNDLE" ]; then
+    # Launch as .app bundle (has MusicKit entitlements)
+    open -a "$APP_BUNDLE" --args &
+    sleep 1
+    MENUBAR_PID=$(pgrep -f "ListenMenuBar.app/Contents/MacOS/ListenMenuBar" | head -1)
+    if [ -z "$MENUBAR_PID" ]; then
+        MENUBAR_PID=$(pgrep -f "ListenMenuBar" | head -1)
+    fi
+else
+    # Fallback: bare binary (no MusicKit)
+    "$BINARY" &
+    MENUBAR_PID=$!
+fi
 sleep 2
 
 if kill -0 $MENUBAR_PID 2>/dev/null; then

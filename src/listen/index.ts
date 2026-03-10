@@ -31,13 +31,13 @@ import { SessionStore } from "./session";
 import { startDashboard, type TranscriptPost } from "./dashboard";
 import {
   SkillRegistry,
-  routeTranscript,
+  classifyTranscript,
   DEFAULT_SKILLS,
   type RouterContext,
-  type RouterResult,
+  type ClassifyResult,
   type SkillExecution,
 } from "./skills";
-import type { DecisionSkillMatch } from "./session";
+import type { DecisionSkillMatch, DecisionExpertResult } from "./session";
 
 // ── State ──────────────────────────────────────────────────────────
 
@@ -57,20 +57,23 @@ function recordSkillExecution(exec: SkillExecution) {
 
 // ── Signal handling ────────────────────────────────────────────────
 
-process.on("SIGINT", async () => {
-  console.log("\n  ⏹  stopping listen...");
+let shuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return; // ignore repeated signals
+  shuttingDown = true;
   running = false;
+
+  console.log(`\n  ⏹  stopping listen... (${signal})`);
   if (activeSession) {
     await activeSession.save();
     console.log("  💾 session saved.");
   }
-});
-process.on("SIGTERM", async () => {
-  running = false;
-  if (activeSession) {
-    await activeSession.save();
-  }
-});
+  process.exit(0);
+}
+
+process.on("SIGINT", () => { shutdown("SIGINT"); });
+process.on("SIGTERM", () => { shutdown("SIGTERM"); });
 
 // ── Shared init ────────────────────────────────────────────────────
 
@@ -102,16 +105,16 @@ async function initSystems(
 }
 
 /**
- * Process a transcript through the skill router.
- * This is the unified pipeline that replaces the old gate + watchlist.
+ * Process a transcript through the skill classifier.
  *
  * Context flow:
- *   1. Build RouterContext with transcript + buffer + recent skill history
- *   2. Route (single LLM call) — router sees recent skills to avoid re-triggers
- *   3. Enrich context with router reasoning + all matches (so handlers see the full picture)
- *   4. Execute matched skills — each handler sees why it was triggered + siblings
- *   5. Record executions into skill history (fed back to future router calls)
- *   6. If interest is high → build situation summary → analyzer sees everything
+ *   1. Build context with transcript + buffer + recent skill history
+ *   2. Classify — parallel fan-out to all skill experts via Promise.all
+ *   3. Log per-expert observability (latency, status, confidence)
+ *   4. Enrich context so handlers see the full picture
+ *   5. Execute matched skills — each handler sees why it was triggered + siblings
+ *   6. Record executions into skill history (fed back to future classifier calls)
+ *   7. If interest is high → build situation summary → analyzer sees everything
  */
 async function processTranscript(
   text: string,
@@ -125,21 +128,19 @@ async function processTranscript(
 ): Promise<void> {
   if (!text || buffer.wordCount < 3) return;
 
-  // 1. Build context — includes recent skill history so router avoids re-triggers
+  // 1. Build context — includes recent skill history so classifier avoids re-triggers
   const ctx: RouterContext = {
     transcript: text,
     buffer: buffer.recentText(2),
     timestamp: new Date(),
-    recentSkills: recentSkillExecutions.slice(-10), // last 10 executions
+    recentSkills: recentSkillExecutions.slice(-10),
   };
 
-  // 2. Capture skill state BEFORE routing (for observability)
+  // 2. Capture skill state BEFORE classification (for observability)
   const skillState = await registry.buildStateContext();
 
-  // 3. Route — single LLM call classifies across all skills
-  const t0 = performance.now();
-  const result: RouterResult = await routeTranscript(ctx, registry, config);
-  const routerMs = Math.round(performance.now() - t0);
+  // 3. Classify — parallel fan-out to all skill experts
+  const result: ClassifyResult = await classifyTranscript(ctx, registry, config);
 
   // 4. Enrich context so skill handlers see the full picture
   ctx.routerReason = result.reason;
@@ -148,7 +149,18 @@ async function processTranscript(
   const matchedNames = result.matches.map((m) => `${m.skill}.${m.action}`);
   const escalated = result.interest >= config.threshold;
 
-  // 5. Record the full router decision for observability
+  // 5. Build per-expert observability records for session
+  const expertResults: DecisionExpertResult[] = result.experts.map((e) => ({
+    skill: e.skill,
+    match: e.match,
+    action: e.action,
+    confidence: e.confidence,
+    expertMs: e.expertMs,
+    roundTripMs: e.roundTripMs,
+    status: e.status,
+    error: e.error,
+  }));
+
   const decisionMatches: DecisionSkillMatch[] = result.matches.map((m) => ({
     skill: m.skill,
     action: m.action,
@@ -164,6 +176,7 @@ async function processTranscript(
     agoSeconds: Math.round((Date.now() - s.timestamp.getTime()) / 1000),
   }));
 
+  // 6. Record the full decision with per-expert breakdown
   const decision = session.addRouterDecision({
     entryId,
     timestamp: new Date().toISOString(),
@@ -174,20 +187,37 @@ async function processTranscript(
     interest: result.interest,
     reason: result.reason,
     matches: decisionMatches,
-    latencyMs: routerMs,
+    classifyMs: result.classifyMs,
+    expertSumMs: result.expertSumMs,
+    expertResults,
     escalated,
     wordCount: buffer.wordCount,
+    latencyMs: result.classifyMs, // backward compat
   });
 
-  // Log to JSONL event file
-  await events.routerResult(
-    result.interest,
-    result.reason,
-    matchedNames,
-    buffer.wordCount
-  );
+  // 7. Log to JSONL — both the legacy router event and the new classify fanout
+  await events.classifyFanout({
+    classifyMs: result.classifyMs,
+    expertSumMs: result.expertSumMs,
+    experts: result.experts.map((e) => ({
+      skill: e.skill,
+      match: e.match,
+      action: e.action,
+      confidence: e.confidence,
+      expertMs: e.expertMs,
+      roundTripMs: e.roundTripMs,
+      status: e.status,
+      error: e.error,
+    })),
+    matchedSkills: matchedNames,
+    interest: result.interest,
+  });
 
+  // 8. Rich console output with per-expert breakdown
   if (config.verbose) {
+    const gain = result.classifyMs > 0
+      ? (result.expertSumMs / result.classifyMs).toFixed(1)
+      : "1.0";
     const icon = result.matches.length > 0
       ? "⚡"
       : escalated
@@ -196,12 +226,29 @@ async function processTranscript(
     const skillList = matchedNames.length > 0
       ? ` → [${matchedNames.join(", ")}]`
       : "";
+
     console.log(
-      `  ${cycleLabel} 🧭 ${icon} interest=${result.interest}/10 (${routerMs}ms)${skillList} — ${result.reason}`
+      `  ${cycleLabel} 🎯 ${icon} classify ${result.experts.length} experts in ${result.classifyMs}ms` +
+      ` (sum: ${result.expertSumMs}ms, gain: ${gain}×)` +
+      ` interest=${result.interest}/10${skillList}`
     );
+
+    // Per-expert breakdown
+    for (const e of result.experts) {
+      const matchIcon = e.match ? "+" : "-";
+      const action = e.match ? `.${e.action}` : "";
+      const conf = e.confidence
+        ? ` [${(e.confidence * 100).toFixed(0)}%]`
+        : "";
+      const status = e.status !== "ok" ? ` (${e.status})` : "";
+      const pad = e.skill.padEnd(12);
+      console.log(
+        `  ${cycleLabel}   ${matchIcon} ${pad}${action}${conf} ${e.roundTripMs}ms (expert: ${e.expertMs}ms)${status}`
+      );
+    }
   }
 
-  // 6. Execute matched skills — each handler sees enriched context
+  // 9. Execute matched skills — each handler sees enriched context
   const executionResults: Array<{
     skill: string;
     action: string;
@@ -221,7 +268,7 @@ async function processTranscript(
 
     const skillResult = await registry.execute(match, ctx);
 
-    // 7. Record into skill history for future router calls
+    // Record into skill history for future classifier calls
     const exec: SkillExecution = {
       skill: match.skill,
       action: match.action,
@@ -244,7 +291,7 @@ async function processTranscript(
       decision.id,
       match.skill,
       match.action,
-      true, // executed
+      true,
       skillResult.success,
       skillResult.voice
     );
@@ -276,8 +323,7 @@ async function processTranscript(
     }
   }
 
-  // 8. Escalate to big model analysis if interest is high
-  //    Analyzer gets FULL situation context: transcript + skill actions + results
+  // 10. Escalate to big model analysis if interest is high
   if (escalated && running) {
     if (config.verbose) {
       console.log(
@@ -304,7 +350,7 @@ async function processTranscript(
  */
 function buildSituationContext(
   timestampedTranscript: string,
-  routerResult: RouterResult,
+  classifyResult: ClassifyResult,
   executions: Array<{
     skill: string;
     action: string;
@@ -318,11 +364,20 @@ function buildSituationContext(
   // Transcript
   sections.push(`CONVERSATION TRANSCRIPT:\n${timestampedTranscript}`);
 
-  // What the router detected
+  // What the classifier detected
+  const expertLines = classifyResult.experts.map((e) => {
+    const icon = e.match ? "MATCHED" : "no match";
+    const action = e.match ? `.${e.action}` : "";
+    const conf = e.confidence
+      ? ` (${(e.confidence * 100).toFixed(0)}% confidence)`
+      : "";
+    return `  ${e.skill}${action}: ${icon}${conf} [${e.roundTripMs}ms]`;
+  });
   sections.push(
-    `ROUTER ASSESSMENT:\n` +
-      `  Interest: ${routerResult.interest}/10\n` +
-      `  Reason: ${routerResult.reason}`
+    `CLASSIFIER ASSESSMENT:\n` +
+      `  Interest: ${classifyResult.interest}/10\n` +
+      `  Classification time: ${classifyResult.classifyMs}ms (parallel)\n` +
+      `  Expert breakdown:\n${expertLines.join("\n")}`
   );
 
   // What skills fired and what they did
@@ -356,7 +411,7 @@ function printBanner(config: ListenConfig): void {
   │  mode          ${config.mode.padEnd(29)}│
   │  audio device  ${audioLine.slice(0, 29).padEnd(29)}│
   │  transcriber   ${transcriber.slice(0, 29).padEnd(29)}│
-  │  router        ${"MLX experts (local)".padEnd(29)}│
+  │  classifier    ${"MLX experts (parallel)".padEnd(29)}│
   │  expert server ${config.expertEndpoint.padEnd(29)}│
   │  analysis      ${config.analysisModel.padEnd(29)}│
   │  threshold     ${(config.threshold + "/10").padEnd(29)}│
@@ -524,7 +579,7 @@ async function runPipeMode(config: ListenConfig): Promise<void> {
   console.log(
     "  📋 pipe mode — paste transcript, press Enter, Ctrl+D to finish."
   );
-  console.log("  Skill router runs on every input.\n");
+  console.log("  Skill classifier runs on every input (parallel fan-out).\n");
 
   const decoder = new TextDecoder();
   let cycle = 0;

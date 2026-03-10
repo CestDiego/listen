@@ -17,7 +17,7 @@ import { readFile } from "fs/promises";
 import { resolve } from "path";
 import { parseArgs } from "util";
 import { SkillRegistry } from "./registry";
-import { routeTranscript } from "./router";
+import { classifyTranscript } from "./classify";
 import { DEFAULT_SKILLS } from "./index";
 import type { RouterContext, RouterResult } from "./types";
 import type { ListenConfig } from "../config";
@@ -153,7 +153,7 @@ async function runEval(
   };
 
   const t0 = performance.now();
-  const result = await routeTranscript(ctx, registry, config);
+  const result = await classifyTranscript(ctx, registry, config);
   const latencyMs = Math.round(performance.now() - t0);
 
   const failures = checkCase(evalCase, result);
@@ -254,7 +254,7 @@ function printReport(results: EvalResult[]) {
 
   console.log(`
   ┌─────────────────────────────────────────────┐
-  │      skill router eval (MLX experts)        │
+  │    skill classifier eval (parallel MLX)      │
   ├─────────────────────────────────────────────┤
   │  ${bar}${passed}/${total} passed (${passRate}%)${reset}${" ".repeat(Math.max(0, 29 - `${passed}/${total} passed (${passRate}%)`.length))}│
   │  true positives:  ${tpPassed}/${truePositives.length}${" ".repeat(Math.max(0, 25 - `${tpPassed}/${truePositives.length}`.length))}│
@@ -280,7 +280,7 @@ function printReport(results: EvalResult[]) {
 async function main() {
   const expertEndpoint = values.endpoint as string;
 
-  console.log(`\n  🧪 skill router eval (MLX experts)`);
+  console.log(`\n  🧪 skill classifier eval (MLX experts, parallel)`);
   console.log(`  endpoint:    ${expertEndpoint}`);
   console.log(`  concurrency: ${CONCURRENCY}`);
   if (FILTER) console.log(`  filter:      "${FILTER}"`);

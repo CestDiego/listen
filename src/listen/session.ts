@@ -53,7 +53,23 @@ export interface DecisionSkillMatch {
   voice?: string;
 }
 
-/** Full snapshot of a router decision — the core observability unit. */
+/** Per-expert classification snapshot for full observability. */
+export interface DecisionExpertResult {
+  skill: string;
+  match: boolean;
+  action?: string;
+  confidence?: number;
+  /** Expert-side inference latency (ms) */
+  expertMs: number;
+  /** Full round-trip latency including HTTP (ms) */
+  roundTripMs: number;
+  /** Classification status */
+  status: "ok" | "error" | "timeout" | "too_short";
+  /** Error detail if any */
+  error?: string;
+}
+
+/** Full snapshot of a classification decision — the core observability unit. */
 export interface RouterDecision {
   /** Unique decision id */
   id: string;
@@ -61,13 +77,13 @@ export interface RouterDecision {
   entryId: string;
   /** When the decision was made */
   timestamp: string;
-  /** The transcript that was routed */
+  /** The transcript that was classified */
   transcript: string;
-  /** Rolling buffer context sent to the router */
+  /** Rolling buffer context sent to the classifier */
   bufferContext: string;
-  /** Skill state at time of routing (e.g. "music: status=playing") */
+  /** Skill state at time of classification (e.g. "music: status=playing") */
   skillState: string;
-  /** Recent skill executions the router saw */
+  /** Recent skill executions the classifier saw */
   recentSkills: Array<{
     skill: string;
     action: string;
@@ -75,18 +91,26 @@ export interface RouterDecision {
     voice?: string;
     agoSeconds: number;
   }>;
-  /** Router result: interest score 0-10 */
+  /** Interest score 0-10 */
   interest: number;
-  /** Router result: brief reasoning */
+  /** Brief reasoning */
   reason: string;
   /** All skill matches with full details */
   matches: DecisionSkillMatch[];
-  /** Router latency in ms */
-  latencyMs: number;
+  /** Total wall-clock time for parallel classification (ms) */
+  classifyMs: number;
+  /** Sum of individual expert round-trip times (ms) — shows parallelism gain */
+  expertSumMs: number;
+  /** Per-expert classification results */
+  expertResults: DecisionExpertResult[];
   /** Whether interest exceeded escalation threshold */
   escalated: boolean;
-  /** Word count at time of routing */
+  /** Word count at time of classification */
   wordCount: number;
+
+  // ── Deprecated: kept for backward compat ──
+  /** @deprecated Use classifyMs instead */
+  latencyMs: number;
 }
 
 export interface Session {
@@ -374,17 +398,23 @@ export class SessionStore {
       e.events.some((ev) => ev.type === "gate.escalation")
     );
 
-    // Router decision stats
+    // Classification decision stats
     const skillActivations = decisions.reduce(
       (sum, d) => sum + d.matches.filter((m) => m.executed).length,
       0
     );
-    const avgLatency = decisions.length > 0
-      ? Math.round(decisions.reduce((sum, d) => sum + d.latencyMs, 0) / decisions.length)
+    const avgClassifyMs = decisions.length > 0
+      ? Math.round(decisions.reduce((sum, d) => sum + d.classifyMs, 0) / decisions.length)
+      : 0;
+    const avgExpertSumMs = decisions.length > 0
+      ? Math.round(decisions.reduce((sum, d) => sum + d.expertSumMs, 0) / decisions.length)
       : 0;
     const avgInterest = decisions.length > 0
       ? Number((decisions.reduce((sum, d) => sum + d.interest, 0) / decisions.length).toFixed(1))
       : 0;
+    const avgParallelGain = avgClassifyMs > 0
+      ? Number((avgExpertSumMs / avgClassifyMs).toFixed(2))
+      : 1;
 
     return {
       totalChunks: entries.length,
@@ -396,10 +426,12 @@ export class SessionStore {
         (sum, e) => sum + (e.text.trim() ? e.text.trim().split(/\s+/).length : 0),
         0
       ),
-      // Router observability stats
+      // Classification observability stats
       totalDecisions: decisions.length,
       skillActivations,
-      avgLatencyMs: avgLatency,
+      avgClassifyMs,
+      avgExpertSumMs,
+      avgParallelGain,
       avgInterest,
       escalationRate: decisions.length > 0
         ? Number((decisions.filter((d) => d.escalated).length / decisions.length * 100).toFixed(1))

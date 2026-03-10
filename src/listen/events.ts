@@ -47,6 +47,31 @@ export interface RouterEvent extends ListenEvent {
   wordCount: number;
 }
 
+export interface ClassifyEvent extends ListenEvent {
+  type: "classify.fanout";
+  /** Wall-clock time for the full parallel fan-out (ms) */
+  classifyMs: number;
+  /** Sum of individual expert round-trip times (ms) */
+  expertSumMs: number;
+  /** Parallelism gain ratio (expertSumMs / classifyMs) */
+  parallelGain: string;
+  /** Per-expert breakdown */
+  experts: Array<{
+    skill: string;
+    match: boolean;
+    action?: string;
+    confidence?: number;
+    expertMs: number;
+    roundTripMs: number;
+    status: string;
+    error?: string;
+  }>;
+  /** Skills that matched */
+  matchedSkills: string[];
+  /** Interest score */
+  interest: number;
+}
+
 export interface SkillEvent extends ListenEvent {
   type: "skill.executed";
   skill: string;
@@ -138,7 +163,7 @@ export class EventEmitter {
     await this.emit(event);
   }
 
-  /** Convenience: emit a router result event. */
+  /** Convenience: emit a router result event (legacy, still used for timeline). */
   async routerResult(
     interest: number,
     reason: string,
@@ -152,6 +177,30 @@ export class EventEmitter {
       reason,
       matchedSkills,
       wordCount,
+    };
+    await this.emit(event);
+  }
+
+  /** Convenience: emit a classify fan-out event with full per-expert observability. */
+  async classifyFanout(data: {
+    classifyMs: number;
+    expertSumMs: number;
+    experts: ClassifyEvent["experts"];
+    matchedSkills: string[];
+    interest: number;
+  }): Promise<void> {
+    const gain = data.classifyMs > 0
+      ? (data.expertSumMs / data.classifyMs).toFixed(2)
+      : "1.00";
+    const event: ClassifyEvent = {
+      timestamp: new Date().toISOString(),
+      type: "classify.fanout",
+      classifyMs: data.classifyMs,
+      expertSumMs: data.expertSumMs,
+      parallelGain: `${gain}×`,
+      experts: data.experts,
+      matchedSkills: data.matchedSkills,
+      interest: data.interest,
     };
     await this.emit(event);
   }
@@ -206,6 +255,8 @@ function eventIcon(type: string): string {
       return "🚀";
     case "router.result":
       return "🧭";
+    case "classify.fanout":
+      return "🎯";
     case "skill.executed":
       return "⚡";
     case "analysis.complete":
@@ -224,6 +275,16 @@ function eventSummary(event: ListenEvent): string {
       return `score=${event.score}/10 — ${event.reason}`;
     case "router.result":
       return `interest=${event.interest}/10 skills=[${event.matchedSkills}] — ${event.reason}`;
+    case "classify.fanout": {
+      const e = event as unknown as ClassifyEvent;
+      const experts = e.experts.map((x) => {
+        const icon = x.match ? "+" : "-";
+        const action = x.match ? `.${x.action}` : "";
+        const conf = x.confidence ? ` [${(x.confidence * 100).toFixed(0)}%]` : "";
+        return `${icon}${x.skill}${action}${conf} ${x.roundTripMs}ms`;
+      }).join(", ");
+      return `${e.classifyMs}ms wall (${e.parallelGain} gain) [${experts}]`;
+    }
     case "skill.executed":
       return `${event.skill}.${event.action} ${event.success ? "✓" : "✗"}`;
     case "analysis.complete":

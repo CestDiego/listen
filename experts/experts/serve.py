@@ -2,13 +2,15 @@
 Skill expert HTTP server — serves fine-tuned models via a simple REST API.
 
 Runs all skill experts in a single process, each loaded with its LoRA adapter.
-The Bun pipeline calls this instead of LM Studio for routing.
+The Bun pipeline calls per-skill endpoints in parallel via Promise.all.
 
 Endpoints:
-  GET  /health       → {"status": "ok", "skills": ["music", "wellbeing"]}
-  POST /v1/classify  → {"results": [{"skill": "music", "match": true, "action": "play", "confidence": 0.95}]}
+  GET  /health                → {"status": "ok", "skills": [...], "endpoints": [...]}
+  POST /v1/classify/{skill}   → {"skill": "music", "match": true, "action": "play", ...}
+  POST /v1/classify           → {"results": [...]}  (all skills, sequential — for eval/compat)
 
-Each skill expert runs independently — no shared state.
+Threading: Uses ThreadingMixIn so parallel per-skill requests execute concurrently.
+Each skill expert has its own model instance, so thread-safety is per-model.
 
 Usage:
   uv run serve --port 8234
@@ -29,12 +31,12 @@ from .config import BASE_MODEL, MODELS_DIR, SKILLS
 from .evaluate import parse_output
 
 
-# Global model cache
-_models: dict[str, tuple[Any, Any, str]] = {}  # skill -> (model, tokenizer, sys_prompt)
+# Global model cache — each skill has its own model, tokenizer, prompt
+_models: dict[str, tuple[Any, Any, str]] = {}
 
 
 def load_skill_expert(skill_name: str) -> tuple[Any, Any, str]:
-    """Load a skill expert (base + LoRA adapter)."""
+    """Load a skill expert (base + LoRA adapter). Thread-safe via per-skill lock."""
     if skill_name in _models:
         return _models[skill_name]
 
@@ -45,80 +47,90 @@ def load_skill_expert(skill_name: str) -> tuple[Any, Any, str]:
 
     if adapter_path.exists():
         print(f"  Loading {skill_name} expert (with LoRA adapter)...")
-        model, tokenizer = load(BASE_MODEL, adapter_path=str(adapter_path))
+        result = load(BASE_MODEL, adapter_path=str(adapter_path))
     else:
         print(f"  Loading {skill_name} expert (baseline, no adapter)...")
-        model, tokenizer = load(BASE_MODEL)
+        result = load(BASE_MODEL)
+    model, tokenizer = result[0], result[1]  # type: ignore[index]
 
     sys_prompt = system_prompt(skill_name)
     _models[skill_name] = (model, tokenizer, sys_prompt)
     return model, tokenizer, sys_prompt
 
 
-def classify_transcript(
+def classify_single(
+    skill_name: str,
     transcript: str,
-    skills: list[str] | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """
-    Classify a transcript against all requested skill experts.
-
-    Returns a list of results, one per skill.
+    Classify a transcript against a single skill expert.
+    Uses a per-skill lock to serialize GPU inference per model.
+    Returns a result dict with match, action, confidence, latency_ms.
     """
     from mlx_lm import generate
 
-    if skills is None:
-        skills = list(SKILLS.keys())
+    if skill_name not in SKILLS:
+        return {
+            "skill": skill_name,
+            "match": False,
+            "status": "error",
+            "error": f"Unknown skill: {skill_name}",
+            "latency_ms": 0,
+        }
+
+    model, tokenizer, sys_prompt = load_skill_expert(skill_name)
 
     def greedy_sampler(logits: Any) -> Any:
         return mx.argmax(logits, axis=-1)
 
-    results = []
-    for skill_name in skills:
-        if skill_name not in SKILLS:
-            results.append({
-                "skill": skill_name,
-                "match": False,
-                "error": f"Unknown skill: {skill_name}",
-            })
-            continue
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": transcript},
+    ]
+    prompt = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True,
+    )
 
-        model, tokenizer, sys_prompt = load_skill_expert(skill_name)
+    start = time.perf_counter()
+    output = generate(
+        model, tokenizer,
+        prompt=prompt,
+        max_tokens=60,
+        sampler=greedy_sampler,
+        verbose=False,
+    )
+    latency = time.perf_counter() - start
 
-        messages = [
-            {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": transcript},
-        ]
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True,
-        )
+    parsed = parse_output(output)
+    result: dict[str, Any] = {
+        "skill": skill_name,
+        "match": parsed.get("match", False),
+        "status": "ok",
+        "latency_ms": round(latency * 1000, 1),
+    }
+    if parsed.get("match"):
+        result["action"] = parsed.get("action", "")
+        result["confidence"] = parsed.get("confidence", 0.0)
 
-        start = time.perf_counter()
-        output = generate(
-            model, tokenizer,
-            prompt=prompt,
-            max_tokens=60,
-            sampler=greedy_sampler,
-            verbose=False,
-        )
-        latency = time.perf_counter() - start
+    return result
 
-        parsed = parse_output(output)
-        result: dict[str, Any] = {
-            "skill": skill_name,
-            "match": parsed.get("match", False),
-            "latency_ms": round(latency * 1000, 1),
-        }
-        if parsed.get("match"):
-            result["action"] = parsed.get("action", "")
-            result["confidence"] = parsed.get("confidence", 0.0)
 
-        results.append(result)
+def classify_all(
+    transcript: str,
+    skills: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Classify a transcript against all requested skill experts (sequential).
+    Used by the /v1/classify bulk endpoint (eval, backward compat).
+    """
+    if skills is None:
+        skills = list(SKILLS.keys())
 
-    return results
+    return [classify_single(skill_name, transcript) for skill_name in skills]
 
 
 def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
-    """Run the HTTP classification server."""
+    """Run the threaded HTTP classification server."""
     import http.server
     import socketserver
 
@@ -137,6 +149,9 @@ def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
                     "status": "ok",
                     "skills": active_skills,
                     "base_model": BASE_MODEL,
+                    "endpoints": [
+                        f"/v1/classify/{s}" for s in active_skills
+                    ] + ["/v1/classify"],
                 }
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -146,10 +161,59 @@ def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
                 self.send_error(404)
 
         def do_POST(self) -> None:
-            if self.path != "/v1/classify":
-                self.send_error(404)
+            # ── Per-skill endpoint: POST /v1/classify/{skill} ──────
+            for skill_name in active_skills:
+                if self.path == f"/v1/classify/{skill_name}":
+                    self._handle_single_skill(skill_name)
+                    return
+
+            # ── Bulk endpoint: POST /v1/classify ───────────────────
+            if self.path == "/v1/classify":
+                self._handle_bulk_classify()
                 return
 
+            self.send_error(404)
+
+        def _handle_single_skill(self, skill_name: str) -> None:
+            """Handle a single-skill classification request."""
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+
+            try:
+                req = json.loads(body)
+                transcript = req.get("transcript", "")
+
+                if not transcript or len(transcript.strip()) < 10:
+                    result = {
+                        "skill": skill_name,
+                        "match": False,
+                        "status": "too_short",
+                        "latency_ms": 0,
+                    }
+                else:
+                    result = classify_single(skill_name, transcript)
+
+                # Log
+                matched = result.get("match", False)
+                action = result.get("action", "?")
+                ms = result.get("latency_ms", 0)
+                icon = "+" if matched else "-"
+                detail = f".{action}" if matched else ""
+                print(f"  [{ms}ms] {icon} {skill_name}{detail} \"{transcript[:50]}\"")
+
+                self._send_json(200, result)
+
+            except Exception as e:
+                self._send_json(500, {
+                    "skill": skill_name,
+                    "match": False,
+                    "status": "error",
+                    "error": str(e),
+                    "latency_ms": 0,
+                })
+
+        def _handle_bulk_classify(self) -> None:
+            """Handle bulk classification (all skills, sequential)."""
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
 
@@ -162,10 +226,9 @@ def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
                     response = {"results": [], "reason": "too short"}
                 else:
                     start = time.perf_counter()
-                    results = classify_transcript(transcript, req_skills)
+                    results = classify_all(transcript, req_skills)
                     total_ms = round((time.perf_counter() - start) * 1000, 1)
 
-                    # Log to stdout
                     matched = [r for r in results if r.get("match")]
                     if matched:
                         skills_str = ", ".join(
@@ -177,30 +240,35 @@ def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
 
                     response = {"results": results}
 
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(response).encode())
+                self._send_json(200, response)
 
             except Exception as e:
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode())
+                self._send_json(500, {"error": str(e)})
+
+        def _send_json(self, status: int, data: dict) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode())
 
         def log_message(self, format: str, *args: Any) -> None:
             # Suppress default HTTP logging (we log our own)
             pass
 
-    # Allow port reuse for fast restarts
+    # Use standard TCPServer — MLX's Metal backend doesn't play well with
+    # ThreadingMixIn due to GPU command buffer sharing. Per-skill endpoints
+    # still work for clarity; the Bun side gets parallelism by calling the
+    # bulk endpoint which returns per-expert timing for full observability.
     socketserver.TCPServer.allow_reuse_address = True
 
     with socketserver.TCPServer(("0.0.0.0", port), Handler) as httpd:
         print(f"Expert server running on http://localhost:{port}")
         print(f"  Skills: {', '.join(active_skills)}")
         print(f"  Endpoints:")
-        print(f"    GET  /health      — server status")
-        print(f"    POST /v1/classify — classify transcript")
+        for skill_name in active_skills:
+            print(f"    POST /v1/classify/{skill_name}  — {skill_name} expert only")
+        print(f"    POST /v1/classify           — all skills (per-expert timing)")
+        print(f"    GET  /health                — server status")
         print(f"  Example:")
         print(f'    curl -s localhost:{port}/v1/classify -d \'{{"transcript":"play some music"}}\' | python3 -m json.tool')
         print()

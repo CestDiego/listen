@@ -609,6 +609,8 @@ class ListenState: ObservableObject {
 
 // MARK: - Menu Bar UI
 
+// Bundle ID must match the App ID registered in the Apple Developer portal
+// for MusicKit entitlement to work: com.diegoberrocal.listen
 @main
 struct ListenMenuBarApp: App {
     @StateObject private var state = ListenState()
