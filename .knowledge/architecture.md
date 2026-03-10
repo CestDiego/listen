@@ -190,10 +190,14 @@ and renders all charts dynamically — no hardcoded dimension lists in the front
 | `wellbeing` | [0, 1] | 120s | classifier | Classifier confidence (0.83-0.95 on match) |
 | `engagement` | [0, 1] | 60s | computed | Chunks in last 60s / 12 (max expected) |
 | `taskFocus` | [0, 1] | 30s | computed | Ratio of skill-matched chunks in last 30s |
-| `mood` | [-1, 1] | 120s | computed | Sentiment heuristic (positive/negative word ratio) |
-| `energy` | [0, 1] | 60s | computed | Speech rate (words per chunk / 30 max) |
+| `mood` | [-1, 1] | 120s | computed | NRC VAD Lexicon average valence (44,728 words) |
+| `energy` | [0, 1] | 60s | computed | Blend: 0.6 × NRC arousal + 0.4 × speech rate |
 
 ### Key Design Decisions
+- **[0, 1] range (not 0-100)**: All dimensions use [0,1] (or [-1,1] for mood). Rationale:
+  classifier softmax outputs are natively [0,1]; decay math stays clean with no scaling;
+  composability (mood × energy stays in range); all ML libraries and the NRC VAD Lexicon
+  speak [0,1]. The dashboard formats for display (`.toFixed(2)`). Decided 2026-03-10.
 - **Decay function**: `baseline + (value - baseline) * 0.5^(elapsed / halfLife)`
 - **Max-not-replace**: classifier activation uses `Math.max(current, confidence)` so rapid
   re-triggers don't lower an already-high signal
@@ -205,6 +209,9 @@ and renders all charts dynamically — no hardcoded dimension lists in the front
   normalized to [0,1] for radar display via `normalizeDim()`
 - **Config-driven**: `buildDimensionMap()`, `buildDimensionMeta()`, `getDimensionDef()`
   derive all runtime structures from `DIMENSION_DEFS`
+- **NRC VAD Lexicon for mood/energy** (Phase 3a, 2026-03-10): Replaced word-list heuristic
+  with NRC VAD v2.1 (44,728 unigrams, [-1,1] scale for V/A/D). Mood uses valence, energy
+  uses arousal. Loaded once at module init into a Map for O(1) per-word lookup.
 
 ### Files
 - `src/listen/intent-vector.ts` — IntentVectorStore class, decay function, types

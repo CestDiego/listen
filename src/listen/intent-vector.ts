@@ -6,10 +6,15 @@
  * Each dimension is defined in DIMENSION_DEFS — adding a new dimension
  * is a single config entry; the engine, gate, and dashboard adapt automatically.
  *
+ * Mood and energy dimensions use the NRC VAD Lexicon (44,728 words) for
+ * word-level valence/arousal scoring instead of naive heuristics.
+ *
  * Decay uses exponential half-life per dimension so stale signals fade
  * naturally. A ring buffer of snapshots provides trend computation and
  * short-term history for downstream consumers.
  */
+
+import { chunkVAD, isLexiconAvailable, loadLexicon } from "./nrc-vad";
 
 // ---------------------------------------------------------------------------
 // Dimension Definition — the single source of truth
@@ -70,18 +75,9 @@ export interface ComputeContext {
 // Dimension Registry — add new dimensions here
 // ---------------------------------------------------------------------------
 
-/** Hoisted word sets for mood sentiment heuristic (O(1) lookup, allocated once). */
-const POSITIVE_WORDS = new Set([
-  "good", "great", "happy", "love", "awesome", "nice", "wonderful",
-  "fantastic", "amazing", "excellent", "beautiful", "perfect", "thanks",
-  "thank", "cool", "fun", "enjoy", "glad", "excited", "brilliant",
-]);
-const NEGATIVE_WORDS = new Set([
-  "bad", "terrible", "hate", "awful", "horrible", "sad", "angry",
-  "frustrated", "annoyed", "tired", "exhausted", "failure", "can't",
-  "never", "worst", "sucks", "miserable", "depressed", "hopeless",
-  "worthless", "useless",
-]);
+// Eagerly load the NRC VAD Lexicon at module init (44,728 words, ~2MB, <100ms).
+// If the file is missing, loadLexicon() warns and returns empty — graceful fallback.
+loadLexicon();
 
 export const DIMENSION_DEFS: readonly DimensionDef[] = [
   {
@@ -148,23 +144,13 @@ export const DIMENSION_DEFS: readonly DimensionDef[] = [
     max: 1,
     source: "computed",
     compute: (ctx) => {
-      // Simple sentiment heuristic: positive/negative word ratio
-      // Uses exact word matching (Set.has) — no substring false positives
-      const text = (ctx.transcript ?? "").toLowerCase();
+      // NRC VAD Lexicon: average valence across all recognized words.
+      // Range: [-1, +1]. Positive = pleasant, negative = unpleasant.
+      // Falls back to 0 (neutral) if lexicon unavailable or no words recognized.
+      const text = ctx.transcript ?? "";
       if (!text) return 0;
-
-      // Strip common punctuation so "can't" → "can't", "great!" → "great"
-      const words = text.split(/\s+/).map((w) => w.replace(/[.,!?;:]+$/g, ""));
-      let pos = 0;
-      let neg = 0;
-      for (const w of words) {
-        if (POSITIVE_WORDS.has(w)) pos++;
-        if (NEGATIVE_WORDS.has(w)) neg++;
-      }
-      const total = pos + neg;
-      if (total === 0) return 0;
-      // Range: -1 (all negative) to +1 (all positive)
-      return (pos - neg) / total;
+      const vad = chunkVAD(text);
+      return vad.valence;
     },
   },
   {
@@ -176,13 +162,28 @@ export const DIMENSION_DEFS: readonly DimensionDef[] = [
     baseline: 0,
     source: "computed",
     compute: (ctx) => {
-      // Speech rate: words per chunk / expected max
+      // Blend two signals:
+      //   1. NRC VAD arousal: lexical energy (excited/calm) [-1, +1] → rescale to [0, 1]
+      //   2. Speech rate: words per chunk / expected max [0, 1]
+      // Final = weighted blend (0.6 arousal + 0.4 speech rate) for robustness.
       const text = ctx.transcript ?? "";
       if (!text) return 0;
+
+      // Signal 1: NRC arousal (lexical energy)
+      let arousalNorm = 0.5; // neutral if no lexicon
+      if (isLexiconAvailable()) {
+        const vad = chunkVAD(text);
+        // Rescale [-1, +1] → [0, 1]: (arousal + 1) / 2
+        arousalNorm = (vad.arousal + 1) / 2;
+      }
+
+      // Signal 2: speech rate
       const wordCount = text.split(/\s+/).filter(Boolean).length;
-      // Normalize: ~30 words per 5s chunk is high energy speech
       const MAX_WORDS_PER_CHUNK = 30;
-      return wordCount / MAX_WORDS_PER_CHUNK;
+      const speechRate = Math.min(1, wordCount / MAX_WORDS_PER_CHUNK);
+
+      // Blend: arousal is the primary signal, speech rate is secondary
+      return 0.6 * arousalNorm + 0.4 * speechRate;
     },
   },
 ];
