@@ -7,6 +7,7 @@
  */
 
 import type { SessionStore } from "./session";
+import { buildDimensionMeta } from "./intent-vector";
 
 const DASHBOARD_PORT = 3838;
 
@@ -55,10 +56,11 @@ export function startDashboard(
                 );
               };
 
-              // Send current state
+              // Send current state + dimension metadata so dashboard discovers dimensions at runtime
               send("init", {
                 session: store.getSession(),
                 stats: store.getStats(),
+                dimensionMeta: buildDimensionMeta(),
               });
 
               // Subscribe to updates
@@ -952,19 +954,25 @@ document.getElementById('filter-skill').addEventListener('change', renderDecisio
 document.getElementById('filter-show').addEventListener('change', renderDecisionsList);
 
 // ── Intent Vector ─────────────────────────────────────────────
-const DIMS = ['music', 'wellbeing', 'engagement', 'taskFocus'];
-const DIM_COLORS = {
-  music: '#58a6ff',      // accent blue
-  wellbeing: '#f85149',  // red
-  engagement: '#3fb950', // green
-  taskFocus: '#d29922',  // yellow
-};
-const DIM_LABELS = {
-  music: 'music',
-  wellbeing: 'wellbeing',
-  engagement: 'engage',
-  taskFocus: 'focus',
-};
+// Dimension metadata is received from the server via SSE init event.
+// These are populated dynamically — no hardcoded dimension list.
+let DIMS = [];        // string[] of dimension keys
+let DIM_COLORS = {};  // key → hex color
+let DIM_LABELS = {};  // key → short label
+let DIM_RANGES = {};  // key → { min, max }
+
+function setDimensionMeta(meta) {
+  if (!meta || !meta.length) return;
+  DIMS = meta.map(d => d.key);
+  DIM_COLORS = {};
+  DIM_LABELS = {};
+  DIM_RANGES = {};
+  meta.forEach(d => {
+    DIM_COLORS[d.key] = d.color;
+    DIM_LABELS[d.key] = d.shortLabel;
+    DIM_RANGES[d.key] = { min: d.min ?? 0, max: d.max ?? 1 };
+  });
+}
 
 let intentHistory = [];
 let currentIntent = null;
@@ -972,6 +980,13 @@ let currentIntent = null;
 // -- Radar chart -------------------------------------------------------
 const radarCanvas = document.getElementById('radar-chart');
 const radarCtx = radarCanvas.getContext('2d');
+
+// Normalize a dimension value to [0, 1] for radar display
+function normalizeDim(key, val) {
+  const range = DIM_RANGES[key] || { min: 0, max: 1 };
+  if (range.max === range.min) return 0;
+  return (val - range.min) / (range.max - range.min);
+}
 
 function drawRadar(dims) {
   const W = radarCanvas.width;
@@ -982,6 +997,7 @@ function drawRadar(dims) {
   const n = DIMS.length;
 
   radarCtx.clearRect(0, 0, W, H);
+  if (n === 0) return; // no dimensions registered yet
 
   // Grid rings (0.25, 0.5, 0.75, 1.0)
   radarCtx.strokeStyle = '#30363d';
@@ -1016,16 +1032,17 @@ function drawRadar(dims) {
     const ty = cy + labelR * Math.sin(angle);
     radarCtx.textAlign = Math.abs(Math.cos(angle)) < 0.01 ? 'center' : (Math.cos(angle) > 0 ? 'left' : 'right');
     radarCtx.textBaseline = Math.abs(Math.sin(angle)) < 0.01 ? 'middle' : (Math.sin(angle) > 0 ? 'top' : 'bottom');
-    radarCtx.fillText(DIM_LABELS[DIMS[i]], tx, ty);
+    radarCtx.fillText(DIM_LABELS[DIMS[i]] || DIMS[i], tx, ty);
   }
 
   if (!dims) return;
 
-  // Filled polygon
+  // Filled polygon — normalize all values to [0, 1] for display
   radarCtx.beginPath();
   for (let i = 0; i <= n; i++) {
+    const key = DIMS[i % n];
     const angle = (Math.PI * 2 * (i % n)) / n - Math.PI / 2;
-    const val = dims[DIMS[i % n]] || 0;
+    const val = normalizeDim(key, dims[key] || 0);
     const x = cx + R * val * Math.cos(angle);
     const y = cy + R * val * Math.sin(angle);
     if (i === 0) radarCtx.moveTo(x, y);
@@ -1039,13 +1056,14 @@ function drawRadar(dims) {
 
   // Points
   for (let i = 0; i < n; i++) {
+    const key = DIMS[i];
     const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-    const val = dims[DIMS[i]] || 0;
+    const val = normalizeDim(key, dims[key] || 0);
     const x = cx + R * val * Math.cos(angle);
     const y = cy + R * val * Math.sin(angle);
     radarCtx.beginPath();
     radarCtx.arc(x, y, 4, 0, Math.PI * 2);
-    radarCtx.fillStyle = DIM_COLORS[DIMS[i]];
+    radarCtx.fillStyle = DIM_COLORS[key] || '#58a6ff';
     radarCtx.fill();
     radarCtx.strokeStyle = '#0d1117';
     radarCtx.lineWidth = 1.5;
@@ -1062,13 +1080,14 @@ function renderReadouts(dims, trends) {
     const trend = trends ? (trends[key] || 0) : 0;
     const trendArrow = trend > 0.05 ? '↑' : (trend < -0.05 ? '↓' : '→');
     const trendColor = trend > 0.05 ? 'var(--green)' : (trend < -0.05 ? 'var(--red)' : 'var(--muted)');
-    const pct = Math.min(100, val * 100);
-    const color = DIM_COLORS[key];
+    // Normalize to percentage for the bar display
+    const pct = Math.min(100, normalizeDim(key, val) * 100);
+    const color = DIM_COLORS[key] || '#58a6ff';
 
     const row = document.createElement('div');
     row.className = 'dim-row';
     row.innerHTML =
-      '<span class="dim-label">' + DIM_LABELS[key] + '</span>' +
+      '<span class="dim-label">' + (DIM_LABELS[key] || key) + '</span>' +
       '<div class="dim-bar"><div class="dim-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
       '<span class="dim-value" style="color:' + color + '">' + val.toFixed(2) + '</span>' +
       '<span class="dim-trend" style="color:' + trendColor + '">' + trendArrow + '</span>';
@@ -1081,7 +1100,7 @@ const sparklinesContainer = document.getElementById('sparklines');
 
 function renderSparklines(history) {
   sparklinesContainer.innerHTML = '';
-  if (!history || history.length < 2) return;
+  if (!history || history.length < 2 || DIMS.length === 0) return;
 
   const W = 500;
   const H = 28;
@@ -1092,7 +1111,7 @@ function renderSparklines(history) {
 
     const label = document.createElement('span');
     label.className = 'sparkline-label';
-    label.textContent = DIM_LABELS[key];
+    label.textContent = DIM_LABELS[key] || key;
     row.appendChild(label);
 
     const canvas = document.createElement('canvas');
@@ -1103,7 +1122,8 @@ function renderSparklines(history) {
     sparklinesContainer.appendChild(row);
 
     const ctx = canvas.getContext('2d');
-    const values = history.map(s => s.dimensions[key] || 0);
+    // Normalize values to [0, 1] for sparkline display
+    const values = history.map(s => normalizeDim(key, s.dimensions[key] || 0));
 
     // Fill area
     ctx.beginPath();
@@ -1115,9 +1135,8 @@ function renderSparklines(history) {
     }
     ctx.lineTo(W, H);
     ctx.closePath();
-    ctx.fillStyle = DIM_COLORS[key].replace(')', ', 0.12)').replace('rgb', 'rgba').replace('#', '');
     // Hex to rgba fill
-    const hex = DIM_COLORS[key];
+    const hex = DIM_COLORS[key] || '#58a6ff';
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
@@ -1132,7 +1151,7 @@ function renderSparklines(history) {
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
-    ctx.strokeStyle = DIM_COLORS[key];
+    ctx.strokeStyle = hex;
     ctx.lineWidth = 1.5;
     ctx.stroke();
   });
@@ -1162,7 +1181,9 @@ function updateGateStatus(gate) {
   label.textContent = gate.state;
 
   // Build detail text
-  let detailText = 'wellbeing: ' + gate.wellbeingLevel.toFixed(2) +
+  const dimName = gate.targetDimension;
+  const level = gate.activationLevel;
+  let detailText = dimName + ': ' + level.toFixed(2) +
     ' | threshold: ' + gate.effectiveThreshold.toFixed(2);
   if (gate.timeSinceLastTrigger !== null) {
     const ago = Math.round(gate.timeSinceLastTrigger / 1000);
@@ -1204,7 +1225,12 @@ updateGateStatus(null);
 const evtSource = new EventSource('/events');
 
 evtSource.addEventListener('init', (e) => {
-  const { session, stats } = JSON.parse(e.data);
+  const { session, stats, dimensionMeta } = JSON.parse(e.data);
+
+  // Apply dimension metadata from server — drives all chart rendering
+  if (dimensionMeta) {
+    setDimensionMeta(dimensionMeta);
+  }
 
   // Clear all state on (re)init — prevents duplicates on SSE reconnect
   timeline.innerHTML = '';
@@ -1234,6 +1260,10 @@ evtSource.addEventListener('init', (e) => {
   if (session.intentVector) {
     updateIntent(session.intentVector, session.intentVectorHistory || [], null);
   }
+
+  // Re-draw radar with current dimension set
+  drawRadar(null);
+  renderReadouts(null, null);
 });
 
 evtSource.addEventListener('chunk', (e) => {

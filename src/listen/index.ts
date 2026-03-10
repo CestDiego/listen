@@ -189,32 +189,34 @@ async function processTranscript(
     match: e.match,
     confidence: e.confidence,
   }));
-  const vectorSnapshot = intentVector.update(vectorInputs);
+  const vectorSnapshot = intentVector.update(vectorInputs, undefined, text);
 
-  // 5c. Activation gate — post-classification wellbeing bias (hysteresis)
-  const classifierMatchedWellbeing = result.matches.some(m => m.skill === "wellbeing");
-  const classifierWellbeingConf = result.experts.find(e => e.skill === "wellbeing")?.confidence ?? 0;
+  // 5c. Activation gate — post-classification routing bias (hysteresis)
+  const gateSkill = activationGate.targetSkill;
+  const gateDim = activationGate.targetDimension;
+  const classifierMatchedGateSkill = result.matches.some(m => m.skill === gateSkill);
+  const classifierGateConf = result.experts.find(e => e.skill === gateSkill)?.confidence ?? 0;
   const gateResult = activationGate.evaluate(
-    classifierMatchedWellbeing,
-    classifierWellbeingConf,
-    vectorSnapshot.dimensions.wellbeing,
+    classifierMatchedGateSkill,
+    classifierGateConf,
+    vectorSnapshot.dimensions[gateDim] ?? 0,
   );
 
-  // If gate promotes, inject a synthetic wellbeing match
+  // If gate promotes, inject a synthetic match for the gate's target skill
   if (gateResult.promoted && gateResult.promotedConfidence) {
     result.matches.push({
-      skill: "wellbeing",
-      action: "check_in",
+      skill: gateSkill,
+      action: activationGate.config.promotionAction,
       params: {},
       confidence: gateResult.promotedConfidence,
     });
-    result.interest = Math.max(result.interest, 7); // Bump interest for promoted wellbeing
+    result.interest = Math.max(result.interest, 7); // Bump interest for promoted match
     result.reason += ` [gate:promoted@${gateResult.promotedConfidence.toFixed(2)}]`;
     if (config.verbose) {
-      console.log(`  [${cycleLabel}] 🛡️ gate promoted wellbeing (state=${gateResult.state}, level=${gateResult.wellbeingLevel.toFixed(2)}, conf=${gateResult.promotedConfidence.toFixed(2)})`);
+      console.log(`  [${cycleLabel}] 🛡️ gate promoted ${gateSkill} (state=${gateResult.state}, level=${gateResult.activationLevel.toFixed(2)}, conf=${gateResult.promotedConfidence.toFixed(2)})`);
     }
   } else if (gateResult.state !== "idle" && config.verbose) {
-    console.log(`  [${cycleLabel}] 🛡️ gate: ${gateResult.state} (level=${gateResult.wellbeingLevel.toFixed(2)}, threshold=${gateResult.effectiveThreshold})`);
+    console.log(`  [${cycleLabel}] 🛡️ gate: ${gateResult.state} (level=${gateResult.activationLevel.toFixed(2)}, threshold=${gateResult.effectiveThreshold})`);
   }
 
   session.emitIntentVector(vectorSnapshot, intentVector.history(), gateResult);

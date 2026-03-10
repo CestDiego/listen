@@ -2,13 +2,246 @@
  * IntentVector — real-time intent signal engine.
  *
  * Maintains a multi-dimensional activation vector that decays over time,
- * updated by classifier (expert) results. Each dimension represents a
- * different intent signal (music, wellbeing, engagement, taskFocus).
+ * updated by classifier (expert) results and computed heuristics.
+ * Each dimension is defined in DIMENSION_DEFS — adding a new dimension
+ * is a single config entry; the engine, gate, and dashboard adapt automatically.
  *
  * Decay uses exponential half-life per dimension so stale signals fade
  * naturally. A ring buffer of snapshots provides trend computation and
  * short-term history for downstream consumers.
  */
+
+// ---------------------------------------------------------------------------
+// Dimension Definition — the single source of truth
+// ---------------------------------------------------------------------------
+
+/**
+ * How a dimension gets its value:
+ *   "classifier" — set directly from classifier match confidence
+ *   "computed"   — calculated by a compute hook each update cycle
+ */
+export type DimensionSource = "classifier" | "computed";
+
+/** Full definition of a single intent dimension. */
+export interface DimensionDef {
+  /** Unique key (used in maps, SSE payloads, dashboard). */
+  key: string;
+  /** Human-readable label for dashboard. */
+  label: string;
+  /** Short label for compact displays (radar axis). */
+  shortLabel: string;
+  /** CSS color (hex) for charts. */
+  color: string;
+  /** Half-life in ms — how fast the signal decays toward baseline. */
+  halfLifeMs: number;
+  /** Value the dimension decays toward. */
+  baseline: number;
+  /** Minimum value (for clamping). Default 0. */
+  min?: number;
+  /** Maximum value (for clamping). Default 1. */
+  max?: number;
+  /** How this dimension is sourced. */
+  source: DimensionSource;
+  /**
+   * For "computed" dimensions: a function called each update cycle.
+   * Receives the compute context and returns the new raw value.
+   * The engine clamps the result to [min, max] after calling this.
+   */
+  compute?: (ctx: ComputeContext) => number;
+  /** For computed dimensions that use a rolling window: window size in ms. */
+  windowMs?: number;
+}
+
+/** Context passed to computed dimension hooks. */
+export interface ComputeContext {
+  /** Current epoch ms. */
+  now: number;
+  /** Timestamps of all chunks in the rolling window. */
+  chunkTimestamps: number[];
+  /** Match log entries in the rolling window. */
+  chunkMatchLog: Array<{ ts: number; matched: boolean }>;
+  /** The current expert results for this update cycle. */
+  expertResults: ExpertResult[];
+  /** The raw transcript text for this chunk (if available). */
+  transcript?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Dimension Registry — add new dimensions here
+// ---------------------------------------------------------------------------
+
+/** Hoisted word sets for mood sentiment heuristic (O(1) lookup, allocated once). */
+const POSITIVE_WORDS = new Set([
+  "good", "great", "happy", "love", "awesome", "nice", "wonderful",
+  "fantastic", "amazing", "excellent", "beautiful", "perfect", "thanks",
+  "thank", "cool", "fun", "enjoy", "glad", "excited", "brilliant",
+]);
+const NEGATIVE_WORDS = new Set([
+  "bad", "terrible", "hate", "awful", "horrible", "sad", "angry",
+  "frustrated", "annoyed", "tired", "exhausted", "failure", "can't",
+  "never", "worst", "sucks", "miserable", "depressed", "hopeless",
+  "worthless", "useless",
+]);
+
+export const DIMENSION_DEFS: readonly DimensionDef[] = [
+  {
+    key: "music",
+    label: "Music",
+    shortLabel: "music",
+    color: "#58a6ff",
+    halfLifeMs: 45_000,
+    baseline: 0,
+    source: "classifier",
+  },
+  {
+    key: "wellbeing",
+    label: "Wellbeing",
+    shortLabel: "wellbeing",
+    color: "#f85149",
+    halfLifeMs: 120_000,
+    baseline: 0,
+    source: "classifier",
+  },
+  {
+    key: "engagement",
+    label: "Engagement",
+    shortLabel: "engage",
+    color: "#3fb950",
+    halfLifeMs: 60_000,
+    baseline: 0,
+    source: "computed",
+    windowMs: 60_000,
+    compute: (ctx) => {
+      // Chunks in last 60s / MAX_CHUNKS_PER_MIN
+      const MAX_CHUNKS_PER_MIN = 12;
+      const cutoff = ctx.now - 60_000;
+      const chunksInWindow = ctx.chunkTimestamps.filter((t) => t >= cutoff).length;
+      return chunksInWindow / MAX_CHUNKS_PER_MIN;
+    },
+  },
+  {
+    key: "taskFocus",
+    label: "Task Focus",
+    shortLabel: "focus",
+    color: "#d29922",
+    halfLifeMs: 30_000,
+    baseline: 0,
+    source: "computed",
+    windowMs: 30_000,
+    compute: (ctx) => {
+      // Matched / total in last 30s window
+      const cutoff = ctx.now - 30_000;
+      const entries = ctx.chunkMatchLog.filter((e) => e.ts >= cutoff);
+      if (entries.length === 0) return 0;
+      const matched = entries.filter((e) => e.matched).length;
+      return matched / entries.length;
+    },
+  },
+  {
+    key: "mood",
+    label: "Mood",
+    shortLabel: "mood",
+    color: "#bc8cff",
+    halfLifeMs: 120_000,
+    baseline: 0,
+    min: -1,
+    max: 1,
+    source: "computed",
+    compute: (ctx) => {
+      // Simple sentiment heuristic: positive/negative word ratio
+      // Uses exact word matching (Set.has) — no substring false positives
+      const text = (ctx.transcript ?? "").toLowerCase();
+      if (!text) return 0;
+
+      // Strip common punctuation so "can't" → "can't", "great!" → "great"
+      const words = text.split(/\s+/).map((w) => w.replace(/[.,!?;:]+$/g, ""));
+      let pos = 0;
+      let neg = 0;
+      for (const w of words) {
+        if (POSITIVE_WORDS.has(w)) pos++;
+        if (NEGATIVE_WORDS.has(w)) neg++;
+      }
+      const total = pos + neg;
+      if (total === 0) return 0;
+      // Range: -1 (all negative) to +1 (all positive)
+      return (pos - neg) / total;
+    },
+  },
+  {
+    key: "energy",
+    label: "Energy",
+    shortLabel: "energy",
+    color: "#f778ba",
+    halfLifeMs: 60_000,
+    baseline: 0,
+    source: "computed",
+    compute: (ctx) => {
+      // Speech rate: words per chunk / expected max
+      const text = ctx.transcript ?? "";
+      if (!text) return 0;
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      // Normalize: ~30 words per 5s chunk is high energy speech
+      const MAX_WORDS_PER_CHUNK = 30;
+      return wordCount / MAX_WORDS_PER_CHUNK;
+    },
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Derived helpers — everything below is computed from DIMENSION_DEFS
+// ---------------------------------------------------------------------------
+
+/** All dimension keys as a readonly array. */
+export const DIMENSION_KEYS: readonly string[] = DIMENSION_DEFS.map((d) => d.key);
+
+/** Type-safe dimension key (union of all registered keys). */
+export type DimensionKey = string;
+
+/** Per-dimension numeric map. */
+export type DimensionMap = Record<string, number>;
+
+/** Build a DimensionMap with every key set to a given value (or per-key baseline). */
+export function buildDimensionMap(fillValue?: number): DimensionMap {
+  const map: DimensionMap = {};
+  for (const def of DIMENSION_DEFS) {
+    map[def.key] = fillValue ?? def.baseline;
+  }
+  return map;
+}
+
+/** Pre-built Map for O(1) dimension lookup by key. */
+const DIMENSION_MAP = new Map<string, DimensionDef>(
+  DIMENSION_DEFS.map((d) => [d.key, d]),
+);
+
+/** Get the DimensionDef for a key, or undefined. O(1). */
+export function getDimensionDef(key: string): DimensionDef | undefined {
+  return DIMENSION_MAP.get(key);
+}
+
+/** Metadata payload sent to dashboard via SSE init event. */
+export interface DimensionMeta {
+  key: string;
+  label: string;
+  shortLabel: string;
+  color: string;
+  min: number;
+  max: number;
+  source: DimensionSource;
+}
+
+/** Build the metadata array for the dashboard. */
+export function buildDimensionMeta(): DimensionMeta[] {
+  return DIMENSION_DEFS.map((d) => ({
+    key: d.key,
+    label: d.label,
+    shortLabel: d.shortLabel,
+    color: d.color,
+    min: d.min ?? 0,
+    max: d.max ?? 1,
+    source: d.source,
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,68 +254,20 @@ export interface ExpertResult {
   confidence?: number;
 }
 
-/** Dimension keys tracked by the vector. */
-export type DimensionKey = "music" | "wellbeing" | "engagement" | "taskFocus";
-
-/** Per-dimension numeric map. */
-export type DimensionMap = Record<DimensionKey, number>;
-
 /** Point-in-time snapshot of the full intent vector. */
 export interface IntentVectorSnapshot {
   timestamp: string; // ISO string
-  dimensions: {
-    music: number; //    [0, 1] — from classifier match
-    wellbeing: number; // [0, 1] — from classifier match
-    engagement: number; // [0, 1] — chunk density (chunks/min)
-    taskFocus: number; //  [0, 1] — ratio of skill-matched to total chunks
-  };
+  dimensions: DimensionMap;
   /** Per-dimension trend: positive = rising, negative = falling, ~0 = stable. */
-  trends: {
-    music: number;
-    wellbeing: number;
-    engagement: number;
-    taskFocus: number;
-  };
+  trends: DimensionMap;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DIMENSION_KEYS: readonly DimensionKey[] = [
-  "music",
-  "wellbeing",
-  "engagement",
-  "taskFocus",
-] as const;
-
-/** Half-life per dimension (ms). Controls how fast each signal decays. */
-const HALF_LIVES: Readonly<DimensionMap> = {
-  music: 45_000,
-  wellbeing: 120_000,
-  engagement: 60_000,
-  taskFocus: 30_000,
-};
-
-/** Baseline each dimension decays toward. */
-const BASELINES: Readonly<DimensionMap> = {
-  music: 0,
-  wellbeing: 0,
-  engagement: 0,
-  taskFocus: 0,
-};
-
 /** Max snapshots retained (~5 min at 1 snapshot/sec). */
 const MAX_SNAPSHOTS = 300;
-
-/** Window for engagement chunk-rate computation (ms). */
-const ENGAGEMENT_WINDOW_MS = 60_000;
-
-/** Max expected chunks per minute for speech (normalization factor). */
-const MAX_CHUNKS_PER_MIN = 12;
-
-/** Window for taskFocus skill-match ratio (ms). */
-const TASK_FOCUS_WINDOW_MS = 30_000;
 
 /** How far back to look for trend comparison (ms). */
 const TREND_LOOKBACK_MS = 10_000;
@@ -120,25 +305,23 @@ export class IntentVectorStore {
   private dims: DimensionMap;
 
   // Timestamp (epoch ms) of the last update per dimension.
-  private lastUpdated: Record<DimensionKey, number>;
+  private lastUpdated: Record<string, number>;
 
   // Ring buffer of snapshots.
   private ring: IntentVectorSnapshot[] = [];
   private ringHead = 0; // next write position
   private ringSize = 0; // number of valid entries
 
-  // Rolling windows for engagement & taskFocus.
+  // Rolling windows for computed dimensions.
   private chunkTimestamps: number[] = [];
   private chunkMatchLog: { ts: number; matched: boolean }[] = [];
 
   constructor() {
-    this.dims = { music: 0, wellbeing: 0, engagement: 0, taskFocus: 0 };
-    this.lastUpdated = {
-      music: 0,
-      wellbeing: 0,
-      engagement: 0,
-      taskFocus: 0,
-    };
+    this.dims = buildDimensionMap();
+    this.lastUpdated = {};
+    for (const def of DIMENSION_DEFS) {
+      this.lastUpdated[def.key] = 0;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -150,64 +333,77 @@ export class IntentVectorStore {
    *
    * @param expertResults  Results from the classify pipeline.
    * @param now            Optional epoch ms (defaults to Date.now()); useful for testing.
+   * @param transcript     Optional transcript text for computed dimensions.
    * @returns The newly computed snapshot.
    */
   update(
     expertResults: ExpertResult[],
     now: number = Date.now(),
+    transcript?: string,
   ): IntentVectorSnapshot {
     // 1. Decay all dimensions based on time elapsed since last update.
-    for (const key of DIMENSION_KEYS) {
-      const elapsed = this.lastUpdated[key] > 0 ? now - this.lastUpdated[key] : 0;
+    for (const def of DIMENSION_DEFS) {
+      const elapsed = this.lastUpdated[def.key] > 0 ? now - this.lastUpdated[def.key] : 0;
       if (elapsed > 0) {
-        this.dims[key] = decay(
-          this.dims[key],
-          BASELINES[key],
-          HALF_LIVES[key],
+        this.dims[def.key] = decay(
+          this.dims[def.key],
+          def.baseline,
+          def.halfLifeMs,
           elapsed,
         );
       }
     }
 
     // 2. Apply expert matches — only raise, never lower an already-high activation.
+    //    Only applies to "classifier" source dimensions.
     const anyMatch = expertResults.some((r) => r.match);
     for (const result of expertResults) {
       if (!result.match) continue;
-      const key = result.skill as DimensionKey;
-      if (!DIMENSION_KEYS.includes(key)) continue;
+      const def = getDimensionDef(result.skill);
+      if (!def || def.source !== "classifier") continue;
       const activation = result.confidence ?? 0.95;
-      this.dims[key] = Math.max(this.dims[key], clamp01(activation));
-      this.lastUpdated[key] = now;
+      const maxVal = def.max ?? 1;
+      const minVal = def.min ?? 0;
+      this.dims[def.key] = Math.max(this.dims[def.key], clamp(activation, minVal, maxVal));
+      this.lastUpdated[def.key] = now;
     }
 
-    // 3. Record chunk arrival for engagement / taskFocus rolling windows.
+    // 3. Record chunk arrival for rolling windows.
     this.chunkTimestamps.push(now);
     this.chunkMatchLog.push({ ts: now, matched: anyMatch });
 
     // Evict stale entries outside the largest window we care about.
-    const evictBefore = now - Math.max(ENGAGEMENT_WINDOW_MS, TASK_FOCUS_WINDOW_MS);
+    const maxWindow = Math.max(
+      ...DIMENSION_DEFS.filter((d) => d.windowMs).map((d) => d.windowMs!),
+      60_000, // minimum 60s
+    );
+    const evictBefore = now - maxWindow;
     this.chunkTimestamps = this.chunkTimestamps.filter((t) => t >= evictBefore);
     this.chunkMatchLog = this.chunkMatchLog.filter((e) => e.ts >= evictBefore);
 
-    // 4. Compute engagement: chunks in last 60s / MAX_CHUNKS_PER_MIN.
-    const engagementCutoff = now - ENGAGEMENT_WINDOW_MS;
-    const chunksInWindow = this.chunkTimestamps.filter((t) => t >= engagementCutoff).length;
-    this.dims.engagement = clamp01(chunksInWindow / MAX_CHUNKS_PER_MIN);
-    this.lastUpdated.engagement = now;
+    // 4. Run compute hooks for "computed" dimensions.
+    const computeCtx: ComputeContext = {
+      now,
+      chunkTimestamps: this.chunkTimestamps,
+      chunkMatchLog: this.chunkMatchLog,
+      expertResults,
+      transcript,
+    };
 
-    // 5. Compute taskFocus: matched / total in last 30s window.
-    const focusCutoff = now - TASK_FOCUS_WINDOW_MS;
-    const focusEntries = this.chunkMatchLog.filter((e) => e.ts >= focusCutoff);
-    if (focusEntries.length > 0) {
-      const matched = focusEntries.filter((e) => e.matched).length;
-      this.dims.taskFocus = clamp01(matched / focusEntries.length);
+    for (const def of DIMENSION_DEFS) {
+      if (def.source === "computed" && def.compute) {
+        const raw = def.compute(computeCtx);
+        const minVal = def.min ?? 0;
+        const maxVal = def.max ?? 1;
+        this.dims[def.key] = clamp(raw, minVal, maxVal);
+        this.lastUpdated[def.key] = now;
+      }
     }
-    this.lastUpdated.taskFocus = now;
 
-    // 6. Compute trends by comparing to ~10s-ago snapshot.
+    // 5. Compute trends by comparing to ~10s-ago snapshot.
     const trends = this.computeTrends(now);
 
-    // 7. Build snapshot and push to ring buffer.
+    // 6. Build snapshot and push to ring buffer.
     const snap: IntentVectorSnapshot = {
       timestamp: new Date(now).toISOString(),
       dimensions: { ...this.dims },
@@ -239,9 +435,9 @@ export class IntentVectorStore {
 
   /** Reset all dimensions, clear rolling windows and history. */
   reset(): void {
-    for (const key of DIMENSION_KEYS) {
-      this.dims[key] = 0;
-      this.lastUpdated[key] = 0;
+    for (const def of DIMENSION_DEFS) {
+      this.dims[def.key] = def.baseline;
+      this.lastUpdated[def.key] = 0;
     }
     this.ring = [];
     this.ringHead = 0;
@@ -259,13 +455,13 @@ export class IntentVectorStore {
    * from ~TREND_LOOKBACK_MS ago. Returns 0 for all dims if no history.
    */
   private computeTrends(now: number): DimensionMap {
-    const trends: DimensionMap = { music: 0, wellbeing: 0, engagement: 0, taskFocus: 0 };
+    const trends = buildDimensionMap(0);
     const past = this.findSnapshotNear(now - TREND_LOOKBACK_MS);
     if (!past) return trends;
 
-    for (const key of DIMENSION_KEYS) {
-      const diff = this.dims[key] - past.dimensions[key];
-      trends[key] = clamp(diff, -1, 1);
+    for (const def of DIMENSION_DEFS) {
+      const diff = this.dims[def.key] - (past.dimensions[def.key] ?? 0);
+      trends[def.key] = clamp(diff, -1, 1);
     }
     return trends;
   }
@@ -327,20 +523,32 @@ export type GateState = "idle" | "vigilant" | "active";
 export interface GateResult {
   /** Current gate state. */
   state: GateState;
-  /** The decayed activation level for wellbeing [0, 1]. */
-  wellbeingLevel: number;
+  /** The target dimension key this gate monitors. */
+  targetDimension: string;
+  /** The decayed activation level for the target dimension [0, 1]. */
+  activationLevel: number;
   /** Effective threshold being used (lower when vigilant). */
   effectiveThreshold: number;
-  /** Whether the gate promoted a wellbeing match this cycle. */
+  /** Whether the gate promoted a match this cycle. */
   promoted: boolean;
   /** If promoted, the synthetic confidence assigned. */
   promotedConfidence?: number;
-  /** Time since last genuine wellbeing trigger (ms), or null if never. */
+  /** Time since last genuine trigger (ms), or null if never. */
   timeSinceLastTrigger: number | null;
+
+  // ── Backward compat aliases ──
+  /** @deprecated Use activationLevel */
+  wellbeingLevel: number;
 }
 
 /** Configuration for the activation gate. */
 export interface GateConfig {
+  /** The dimension key this gate monitors. Default: "wellbeing" */
+  targetDimension: string;
+  /** The skill name to match/promote for. Default: same as targetDimension */
+  targetSkill: string;
+  /** The action to inject when promoting. Default: "check_in" */
+  promotionAction: string;
   /** Classifier confidence to enter active state. Default: 0.55 */
   activateThreshold: number;
   /** Intent vector level to drop back to idle. Default: 0.15 */
@@ -355,6 +563,9 @@ export interface GateConfig {
 }
 
 export const DEFAULT_GATE_CONFIG: GateConfig = {
+  targetDimension: "wellbeing",
+  targetSkill: "wellbeing",
+  promotionAction: "check_in",
   activateThreshold: 0.55,
   deactivateThreshold: 0.15,
   promotionConfidence: 0.40,
@@ -365,25 +576,35 @@ export const DEFAULT_GATE_CONFIG: GateConfig = {
 export class ActivationGate {
   private state: GateState = "idle";
   private lastGenuineTriggerMs: number | null = null;
-  private config: GateConfig;
+  readonly config: GateConfig;
 
   constructor(config?: Partial<GateConfig>) {
     this.config = { ...DEFAULT_GATE_CONFIG, ...config };
   }
 
+  /** The dimension key this gate monitors. */
+  get targetDimension(): string {
+    return this.config.targetDimension;
+  }
+
+  /** The skill name this gate matches/promotes. */
+  get targetSkill(): string {
+    return this.config.targetSkill;
+  }
+
   /**
    * Evaluate the gate after classification.
    *
-   * @param classifierMatchedWellbeing  Did the classifier return a wellbeing match?
-   * @param classifierConfidence        Confidence of the wellbeing match (0 if no match)
-   * @param intentVectorWellbeingLevel  Current wellbeing dimension from IntentVectorStore
-   * @param now                         Current time (epoch ms), for testing
+   * @param classifierMatched       Did the classifier return a match for the target skill?
+   * @param classifierConfidence    Confidence of the match (0 if no match)
+   * @param intentVectorLevel       Current target dimension level from IntentVectorStore
+   * @param now                     Current time (epoch ms), for testing
    * @returns GateResult with state, whether to promote, etc.
    */
   evaluate(
-    classifierMatchedWellbeing: boolean,
+    classifierMatched: boolean,
     classifierConfidence: number,
-    intentVectorWellbeingLevel: number,
+    intentVectorLevel: number,
     now: number = Date.now(),
   ): GateResult {
     const timeSince = this.lastGenuineTriggerMs !== null
@@ -396,11 +617,11 @@ export class ActivationGate {
     }
 
     // State transitions
-    if (classifierMatchedWellbeing && classifierConfidence >= this.config.activateThreshold) {
+    if (classifierMatched && classifierConfidence >= this.config.activateThreshold) {
       // Genuine strong match → active, renew timer
       this.state = "active";
       this.lastGenuineTriggerMs = now;
-    } else if (classifierMatchedWellbeing) {
+    } else if (classifierMatched) {
       // Classifier matched but below activate threshold — still counts as genuine
       // Keep current state or upgrade to vigilant
       this.lastGenuineTriggerMs = now;
@@ -412,7 +633,7 @@ export class ActivationGate {
       this.state = "vigilant";
     } else if (this.state === "vigilant") {
       // Check if we should drop to idle
-      if (intentVectorWellbeingLevel < this.config.deactivateThreshold) {
+      if (intentVectorLevel < this.config.deactivateThreshold) {
         this.state = "idle";
       }
       // else: stay vigilant (hysteresis — between thresholds)
@@ -430,23 +651,26 @@ export class ActivationGate {
 
     if (
       this.state === "vigilant" &&
-      !classifierMatchedWellbeing &&
-      intentVectorWellbeingLevel >= this.config.deactivateThreshold
+      !classifierMatched &&
+      intentVectorLevel >= this.config.deactivateThreshold
     ) {
       promoted = true;
       // Scale promotion confidence by the current activation level
       // Higher activation = higher confidence in the promotion
       promotedConfidence = this.config.promotionConfidence *
-        Math.min(1, intentVectorWellbeingLevel / this.config.activateThreshold);
+        Math.min(1, intentVectorLevel / this.config.activateThreshold);
     }
 
     return {
       state: this.state,
-      wellbeingLevel: intentVectorWellbeingLevel,
+      targetDimension: this.config.targetDimension,
+      activationLevel: intentVectorLevel,
       effectiveThreshold,
       promoted,
       promotedConfidence,
       timeSinceLastTrigger: timeSince,
+      // backward compat
+      wellbeingLevel: intentVectorLevel,
     };
   }
 
@@ -465,10 +689,6 @@ export class ActivationGate {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function clamp01(v: number): number {
-  return Math.max(0, Math.min(1, v));
-}
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));

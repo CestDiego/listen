@@ -152,39 +152,59 @@ signals derived from classifier outputs. Visualized live in the dashboard's
 ```
 Transcript → classifyTranscript() → expertResults[]
                                           ↓
-                                   IntentVectorStore.update()
+                                   IntentVectorStore.update(results, now, transcript)
                                      ├─ Decay all dimensions (exponential half-life)
-                                     ├─ Apply expert match activations (max, not replace)
-                                     ├─ Compute engagement (chunk density in 60s window)
-                                     ├─ Compute taskFocus (match ratio in 30s window)
+                                     ├─ Apply classifier match activations (source: "classifier")
+                                     ├─ Run compute hooks for computed dimensions (source: "computed")
                                      ├─ Compute trends (Δ vs 10s-ago snapshot)
                                      └─ Push to ring buffer (300 slots ≈ 5 min)
                                           ↓
-                                   session.emitIntentVector(snapshot, history)
+                                   session.emitIntentVector(snapshot, history, gate)
                                           ↓
                                    SSE "intentVector" → Dashboard
-                                     ├─ Radar chart (Canvas API, 4 axes)
+                                     ├─ Radar chart (Canvas API, n axes — auto-adapts)
                                      ├─ Dimension readouts (bars + trend arrows)
                                      └─ Sparkline traces (per-dimension, 5 min)
 ```
 
-### Dimensions (Phase 1)
+### Extensible Dimension System (Refactored 2026-03-10)
 
-| Dimension | Range | Decay Half-Life | Source |
-|-----------|-------|-----------------|--------|
-| `music` | [0, 1] | 45s | Classifier confidence (0.95 on match) |
-| `wellbeing` | [0, 1] | 120s | Classifier confidence (0.83-0.95 on match) |
-| `engagement` | [0, 1] | 60s | Chunks in last 60s / 12 (max expected) |
-| `taskFocus` | [0, 1] | 30s | Ratio of skill-matched chunks in last 30s |
+All dimensions are defined in `DIMENSION_DEFS` (intent-vector.ts). Adding a new
+dimension is a single config entry — the engine, gate, and dashboard adapt automatically.
+
+Each `DimensionDef` specifies:
+- `key`, `label`, `shortLabel`, `color` — identity + display
+- `halfLifeMs`, `baseline`, `min`, `max` — decay + range
+- `source: "classifier" | "computed"` — how the value is set
+- `compute?: (ctx: ComputeContext) => number` — hook for computed dimensions
+- `windowMs?` — rolling window size for computed dimensions
+
+The dashboard receives dimension metadata via SSE `init` event (`dimensionMeta` field)
+and renders all charts dynamically — no hardcoded dimension lists in the frontend.
+
+### Dimensions (Phase 1 + Phase 2)
+
+| Dimension | Range | Decay Half-Life | Source | Description |
+|-----------|-------|-----------------|--------|-------------|
+| `music` | [0, 1] | 45s | classifier | Classifier confidence (0.95 on match) |
+| `wellbeing` | [0, 1] | 120s | classifier | Classifier confidence (0.83-0.95 on match) |
+| `engagement` | [0, 1] | 60s | computed | Chunks in last 60s / 12 (max expected) |
+| `taskFocus` | [0, 1] | 30s | computed | Ratio of skill-matched chunks in last 30s |
+| `mood` | [-1, 1] | 120s | computed | Sentiment heuristic (positive/negative word ratio) |
+| `energy` | [0, 1] | 60s | computed | Speech rate (words per chunk / 30 max) |
 
 ### Key Design Decisions
 - **Decay function**: `baseline + (value - baseline) * 0.5^(elapsed / halfLife)`
-- **Max-not-replace**: activation uses `Math.max(current, confidence)` so rapid
+- **Max-not-replace**: classifier activation uses `Math.max(current, confidence)` so rapid
   re-triggers don't lower an already-high signal
 - **Ring buffer**: fixed 300 slots with head pointer, O(1) push, ordered materialization
 - **Trends**: compare current vs ~10s-ago snapshot, clamped to [-1, 1]
-- **SSE event**: `"intentVector"` with `{ snapshot, history }` — full history sent
+- **SSE event**: `"intentVector"` with `{ snapshot, history, gate }` — full history sent
   each time so dashboard can redraw sparklines from any reconnect point
+- **Radar normalization**: dimensions with non-[0,1] ranges (e.g. mood [-1,1]) are
+  normalized to [0,1] for radar display via `normalizeDim()`
+- **Config-driven**: `buildDimensionMap()`, `buildDimensionMeta()`, `getDimensionDef()`
+  derive all runtime structures from `DIMENSION_DEFS`
 
 ### Files
 - `src/listen/intent-vector.ts` — IntentVectorStore class, decay function, types
@@ -200,13 +220,21 @@ Requires `./start.sh` or manual pipeline + expert server startup.
 
 ---
 
-## Activation Gate (Post-Classification Wellbeing Bias)
+## Activation Gate (Post-Classification Routing Bias)
 
 ### Overview
 A Schmitt-trigger-inspired state machine that sits after the classifier and biases
-routing toward wellbeing when recent context suggests emotional distress. Implements
-hysteresis (different thresholds for activation vs deactivation) and cost-asymmetric
-promotion (missing distress costs 10× more than a false check-in).
+routing toward a target skill when recent context suggests sustained intent. Generalized
+to accept any target dimension/skill (defaults to wellbeing). Implements hysteresis
+(different thresholds for activation vs deactivation) and cost-asymmetric promotion.
+
+### Generalization (Refactored 2026-03-10)
+The gate is now parameterized via `GateConfig`:
+- `targetDimension` — which intent vector dimension to monitor (default: "wellbeing")
+- `targetSkill` — which skill to match/promote (default: "wellbeing")
+- `promotionAction` — action to inject when promoting (default: "check_in")
+
+This allows creating multiple gates for different skills in the future.
 
 ### Research Basis
 - **Collins & Loftus (1975)** — spreading activation theory (decay + propagation)
@@ -217,7 +245,7 @@ promotion (missing distress costs 10× more than a false check-in).
 
 ### State Machine
 ```
-                 classifier matches wellbeing
+                 classifier matches target skill
                  (confidence >= 0.55)
     ┌──────────────────────────────────────┐
     │                                      ▼
@@ -228,9 +256,9 @@ promotion (missing distress costs 10× more than a false check-in).
     └──────────────────────────── VIGILANT
                                     │
                                     │ if !classifierMatch && vector >= 0.15:
-                                    │   → PROMOTE wellbeing @ 0.40 confidence
+                                    │   → PROMOTE target skill @ 0.40 confidence
                                     │
-                                    │ renewal: any genuine wellbeing match
+                                    │ renewal: any genuine target match
                                     │   → back to ACTIVE, reset timer
 ```
 
@@ -270,6 +298,7 @@ Gate scenario with 9 transcripts:
 - `scripts/inject-test.ts` — `--scenario gate` for hysteresis testing
 
 ### Future Phases
-- **Phase 2**: Add `mood` (sentiment), `energy` (speech rate) dimensions via heuristics
+- **Phase 2**: ✅ DONE — `mood` (sentiment) and `energy` (speech rate) added as computed dimensions
 - **Phase 3**: Train tiny LoRA classifiers for important dimensions
 - **Phase 4**: Explore steering vectors from model activations (see `.knowledge/intent-vectors.md`)
+- **Phase 5**: Multiple activation gates for different skills (gate is now parameterized)

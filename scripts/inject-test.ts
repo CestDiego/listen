@@ -10,6 +10,14 @@
  *   gate   — ActivationGate hysteresis test (ambiguous before/after trigger)
  *   all    — Runs basic, then a 10s gap, then gate (default)
  *
+ * Dimensions tested (6-axis radar):
+ *   music      — classifier-driven, from music skill matches
+ *   wellbeing  — classifier-driven, from wellbeing skill matches
+ *   engagement — computed: chunk density (chunks/min)
+ *   taskFocus  — computed: ratio of skill-matched to total chunks
+ *   mood       — computed: sentiment heuristic (positive/negative word ratio)
+ *   energy     — computed: speech rate (words per chunk / expected max)
+ *
  * Prerequisites:
  *   - Dashboard running (./start.sh)
  *   - Expert server running at localhost:8234
