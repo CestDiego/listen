@@ -81,9 +81,9 @@ loadLexicon();
 
 export const DIMENSION_DEFS: readonly DimensionDef[] = [
   {
-    key: "music",
-    label: "Music",
-    shortLabel: "music",
+    key: "accommodator",
+    label: "Accommodator",
+    shortLabel: "accom",
     color: "#58a6ff",
     halfLifeMs: 45_000,
     baseline: 0,
@@ -301,6 +301,9 @@ export function decay(
 // IntentVectorStore
 // ---------------------------------------------------------------------------
 
+/** Callback type for intent vector update listeners. */
+export type IntentVectorListener = (snapshot: IntentVectorSnapshot) => void;
+
 export class IntentVectorStore {
   // Current dimension activations.
   private dims: DimensionMap;
@@ -316,6 +319,32 @@ export class IntentVectorStore {
   // Rolling windows for computed dimensions.
   private chunkTimestamps: number[] = [];
   private chunkMatchLog: { ts: number; matched: boolean }[] = [];
+
+  // Listeners for intent vector updates (observer pattern).
+  private listeners: IntentVectorListener[] = [];
+
+  /**
+   * Subscribe to intent vector updates.
+   * Returns an unsubscribe function.
+   */
+  onUpdate(fn: IntentVectorListener): () => void {
+    this.listeners.push(fn);
+    return () => {
+      const idx = this.listeners.indexOf(fn);
+      if (idx >= 0) this.listeners.splice(idx, 1);
+    };
+  }
+
+  /** Notify all listeners of a new snapshot. */
+  private notifyListeners(snapshot: IntentVectorSnapshot): void {
+    for (const fn of this.listeners) {
+      try {
+        fn(snapshot);
+      } catch (e) {
+        console.error("  ⚠ intent vector listener error:", e);
+      }
+    }
+  }
 
   constructor() {
     this.dims = buildDimensionMap();
@@ -411,6 +440,7 @@ export class IntentVectorStore {
       trends,
     };
     this.pushSnapshot(snap);
+    this.notifyListeners(snap);
 
     return snap;
   }
