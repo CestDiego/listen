@@ -7,7 +7,7 @@
  *
  * Usage:
  *   bun run src/listen/skills/eval.ts                    # run all cases
- *   bun run src/listen/skills/eval.ts --filter "music"   # run matching cases
+ *   bun run src/listen/skills/eval.ts --filter "accommodator"  # run matching cases
  *   bun run src/listen/skills/eval.ts --concurrency 3    # parallel calls
  *
  * Requires the expert server running: cd experts && uv run serve

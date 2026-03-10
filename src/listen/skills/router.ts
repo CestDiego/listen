@@ -124,13 +124,13 @@ function parseExpertResponse(data: ExpertResponse): RouterResult {
   // Compute interest score from expert results:
   //   - Each matching skill adds to interest
   //   - Wellbeing matches always high interest (8+)
-  //   - Music matches moderate interest (5)
+  //   - Accommodator matches moderate interest (5)
   //   - No matches = low interest (1-2)
   let interest = 1;
   for (const match of matches) {
     if (match.skill === "wellbeing") {
       interest = Math.max(interest, 8);
-    } else if (match.skill === "music") {
+    } else if (match.skill === "accommodator") {
       interest = Math.max(interest, 5);
     } else {
       interest = Math.max(interest, 4);
