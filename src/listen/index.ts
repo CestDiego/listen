@@ -230,6 +230,15 @@ async function processTranscript(
 
   session.emitIntentVector(vectorSnapshot, intentVector.history(), gateResult);
 
+  // Emit accommodator state if the skill is registered
+  try {
+    const accommodator = registry.get("accommodator");
+    if (accommodator?.getState) {
+      const accomState = await accommodator.getState();
+      session.emitAccommodator(accomState);
+    }
+  } catch { /* accommodator not registered */ }
+
   // 6. Record the full decision with per-expert breakdown
   const decision = session.addRouterDecision({
     entryId,

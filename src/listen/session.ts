@@ -136,6 +136,7 @@ export class SessionStore {
   private subscribers: Set<SSESubscriber> = new Set();
   private intentVector: IntentVectorSnapshot | null = null;
   private intentVectorHistory: IntentVectorSnapshot[] = [];
+  private accommodatorState: Record<string, string> | null = null;
 
   constructor(savePath: string, config: Record<string, unknown>) {
     this.savePath = savePath;
@@ -360,6 +361,12 @@ export class SessionStore {
     this.notify("intentVector", { snapshot, history, gate: gate ?? null });
   }
 
+  /** Store and broadcast the Accommodator state. */
+  emitAccommodator(state: Record<string, string>): void {
+    this.accommodatorState = state;
+    this.notify("accommodator", state);
+  }
+
   /** Correct a transcription. Returns true if found. */
   correct(entryId: string, correctedText: string): boolean {
     const entry = this.session.timeline.find((e) => e.id === entryId);
@@ -381,11 +388,12 @@ export class SessionStore {
   }
 
   /** Get the full session data (for API / dashboard). */
-  getSession(): Session & { intentVector?: IntentVectorSnapshot | null; intentVectorHistory?: IntentVectorSnapshot[] } {
+  getSession(): Session & { intentVector?: IntentVectorSnapshot | null; intentVectorHistory?: IntentVectorSnapshot[]; accommodator?: Record<string, string> | null } {
     return {
       ...this.session,
       intentVector: this.intentVector,
       intentVectorHistory: this.intentVectorHistory,
+      accommodator: this.accommodatorState,
     };
   }
 

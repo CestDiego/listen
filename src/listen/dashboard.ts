@@ -530,6 +530,103 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     background: rgba(248, 81, 73, 0.15); color: var(--red);
     font-weight: 600;
   }
+
+  /* ── Accommodator Panel ──────────────────────────────────── */
+  #accommodator-panel {
+    max-width: 960px; margin: 0 auto; padding: 16px 20px;
+  }
+  .accom-status {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;
+    border: 1px solid var(--border); background: var(--surface);
+  }
+  .accom-status-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .accom-status-dot.inactive { background: var(--muted); }
+  .accom-status-dot.matching { background: var(--yellow); animation: pulse 1.5s infinite; }
+  .accom-status-dot.steering { background: var(--accent); animation: pulse 1s infinite; }
+  .accom-status-dot.arrived { background: var(--green); }
+  .accom-status-label {
+    font-size: 14px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .accom-status-label.inactive { color: var(--muted); }
+  .accom-status-label.matching { color: var(--yellow); }
+  .accom-status-label.steering { color: var(--accent); }
+  .accom-status-label.arrived { color: var(--green); }
+  .accom-track {
+    color: var(--muted); font-size: 12px; margin-left: auto;
+  }
+  .accom-grid {
+    display: grid; grid-template-columns: 280px 1fr; gap: 20px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 700px) {
+    .accom-grid { grid-template-columns: 1fr; }
+  }
+  .circumplex {
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+    gap: 4px; aspect-ratio: 1; max-width: 280px;
+  }
+  .circumplex-cell {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 16px 8px; border-radius: 8px; font-size: 11px;
+    border: 2px solid var(--border); background: var(--surface);
+    transition: all 0.3s;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .circumplex-cell.active {
+    border-color: var(--accent); background: rgba(88, 166, 255, 0.1);
+  }
+  .circumplex-cell.target {
+    border-color: var(--green); box-shadow: 0 0 0 1px var(--green);
+  }
+  .circumplex-cell .quad-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .circumplex-cell .quad-desc { color: var(--muted); font-size: 10px; text-transform: none; }
+  .accom-details {
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .accom-detail-card {
+    padding: 12px 16px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface);
+  }
+  .accom-detail-label {
+    font-size: 10px; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 600;
+  }
+  .accom-detail-value {
+    font-size: 14px; font-weight: 600;
+  }
+  .accom-progress-bar {
+    width: 100%; height: 6px; border-radius: 3px;
+    background: var(--border); overflow: hidden; margin-top: 6px;
+  }
+  .accom-progress-fill {
+    height: 100%; border-radius: 3px; background: var(--accent);
+    transition: width 0.5s ease-out;
+  }
+  .accom-empty {
+    text-align: center; color: var(--muted); padding: 60px 20px;
+  }
+  .accom-empty h2 { font-size: 16px; margin-bottom: 8px; }
+  .accom-special {
+    display: flex; gap: 4px; margin-top: 8px;
+  }
+  .circumplex-special {
+    display: flex; align-items: center; justify-content: center;
+    padding: 8px 12px; border-radius: 6px; font-size: 11px;
+    border: 2px solid var(--border); background: var(--surface);
+    transition: all 0.3s; flex: 1;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .circumplex-special.active {
+    border-color: var(--accent); background: rgba(88, 166, 255, 0.1);
+  }
+  .circumplex-special.target {
+    border-color: var(--green); box-shadow: 0 0 0 1px var(--green);
+  }
 </style>
 </head>
 <body>
@@ -552,6 +649,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div class="tabs">
     <button class="tab active" data-tab="timeline">Timeline</button>
     <button class="tab" data-tab="decisions">Decisions <span class="tab-badge" id="decisions-count">0</span></button>
+    <button class="tab" data-tab="accommodator">Accommodator</button>
     <button class="tab" data-tab="intent">Intent</button>
   </div>
 </header>
@@ -584,6 +682,68 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     </div>
     <div id="decisions-list">
       <div class="decision-empty">No router decisions yet. Speak and they'll appear here.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Accommodator Panel -->
+<div class="tab-panel" id="panel-accommodator">
+  <div id="accommodator-panel">
+    <div class="accom-status" id="accom-status">
+      <div class="accom-status-dot inactive" id="accom-dot"></div>
+      <span class="accom-status-label inactive" id="accom-label">inactive</span>
+      <span class="accom-track" id="accom-track"></span>
+    </div>
+    <div class="accom-grid">
+      <div>
+        <div class="circumplex" id="circumplex-grid">
+          <div class="circumplex-cell" data-quadrant="release">
+            <span class="quad-name">release</span>
+            <span class="quad-desc">intense, cathartic</span>
+          </div>
+          <div class="circumplex-cell" data-quadrant="uplift">
+            <span class="quad-name">uplift</span>
+            <span class="quad-desc">upbeat, happy</span>
+          </div>
+          <div class="circumplex-cell" data-quadrant="comfort">
+            <span class="quad-name">comfort</span>
+            <span class="quad-desc">gentle, warm</span>
+          </div>
+          <div class="circumplex-cell" data-quadrant="calm">
+            <span class="quad-name">calm</span>
+            <span class="quad-desc">ambient, peaceful</span>
+          </div>
+        </div>
+        <div class="accom-special">
+          <div class="circumplex-special" data-quadrant="focus">focus</div>
+          <div class="circumplex-special" data-quadrant="neutral">neutral</div>
+        </div>
+      </div>
+      <div class="accom-details">
+        <div class="accom-detail-card">
+          <div class="accom-detail-label">Current Quadrant</div>
+          <div class="accom-detail-value" id="accom-quadrant">&#8212;</div>
+        </div>
+        <div class="accom-detail-card">
+          <div class="accom-detail-label">Target</div>
+          <div class="accom-detail-value" id="accom-target">&#8212;</div>
+        </div>
+        <div class="accom-detail-card">
+          <div class="accom-detail-label">Now Playing</div>
+          <div class="accom-detail-value" id="accom-playing">&#8212;</div>
+        </div>
+        <div class="accom-detail-card">
+          <div class="accom-detail-label">ISO Progress</div>
+          <div class="accom-detail-value" id="accom-iso-text">&#8212;</div>
+          <div class="accom-progress-bar">
+            <div class="accom-progress-fill" id="accom-progress" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="accom-empty" id="accom-empty">
+      <h2>accommodator inactive</h2>
+      <p>Say "play some music" or "help me focus" to activate mood-responsive audio.</p>
     </div>
   </div>
 </div>
@@ -1256,6 +1416,11 @@ evtSource.addEventListener('init', (e) => {
     renderDecisionsList();
   }
 
+  // Load accommodator state
+  if (session.accommodator) {
+    updateAccommodator(session.accommodator);
+  }
+
   // Load intent vector state
   if (session.intentVector) {
     updateIntent(session.intentVector, session.intentVectorHistory || [], null);
@@ -1311,6 +1476,72 @@ evtSource.addEventListener('correction', (e) => {
 evtSource.addEventListener('intentVector', (e) => {
   const data = JSON.parse(e.data);
   updateIntent(data.snapshot, data.history, data.gate);
+});
+
+// ── Accommodator ──────────────────────────────────────────────
+function updateAccommodator(state) {
+  if (!state) return;
+  
+  const dot = document.getElementById('accom-dot');
+  const label = document.getElementById('accom-label');
+  const track = document.getElementById('accom-track');
+  const emptyEl = document.getElementById('accom-empty');
+  
+  const status = state.status || 'inactive';
+  
+  // Update status indicator
+  dot.className = 'accom-status-dot ' + status;
+  label.className = 'accom-status-label ' + status;
+  label.textContent = status;
+  
+  // Show/hide empty state
+  if (status !== 'inactive') {
+    if (emptyEl) emptyEl.style.display = 'none';
+  } else {
+    if (emptyEl) emptyEl.style.display = '';
+  }
+  
+  // Track info
+  const trackName = state.track || 'none';
+  track.textContent = trackName !== 'none' ? 'Now playing: ' + trackName : '';
+  
+  // Quadrant highlighting
+  document.querySelectorAll('.circumplex-cell, .circumplex-special').forEach(el => {
+    el.classList.remove('active', 'target');
+    const q = el.dataset.quadrant;
+    if (q === state.quadrant) el.classList.add('active');
+    if (q === state.target) el.classList.add('target');
+  });
+  
+  // Detail cards
+  document.getElementById('accom-quadrant').textContent = state.quadrant || '\\u2014';
+  document.getElementById('accom-target').textContent = state.target || '\\u2014';
+  document.getElementById('accom-playing').textContent = trackName !== 'none' ? trackName : '\\u2014';
+  
+  // ISO progress
+  const isoText = document.getElementById('accom-iso-text');
+  const progressBar = document.getElementById('accom-progress');
+  
+  if (status === 'inactive') {
+    isoText.textContent = '\\u2014';
+    progressBar.style.width = '0%';
+  } else if (status === 'matching') {
+    isoText.textContent = 'Matching current mood...';
+    progressBar.style.width = '25%';
+    progressBar.style.background = 'var(--yellow)';
+  } else if (status === 'steering') {
+    isoText.textContent = 'Steering toward ' + (state.target || 'target') + '...';
+    progressBar.style.width = '60%';
+    progressBar.style.background = 'var(--accent)';
+  } else if (status === 'arrived') {
+    isoText.textContent = 'Arrived at target mood';
+    progressBar.style.width = '100%';
+    progressBar.style.background = 'var(--green)';
+  }
+}
+
+evtSource.addEventListener('accommodator', (e) => {
+  updateAccommodator(JSON.parse(e.data));
 });
 
 evtSource.addEventListener('stats', (e) => {
