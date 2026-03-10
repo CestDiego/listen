@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>listen — pitch deck</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --accent: #58a6ff;
+  --text: #c9d1d9;
+  --text-dim: #8b949e;
+  --text-bright: #f0f6fc;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --orange: #db6d28;
+  --purple: #bc8cff;
+  --cyan: #39d2c0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+@font-face {
+  font-family: 'Mono';
+  src: local('Berkeley Mono'), local('SF Mono'), local('Fira Code'), local('JetBrains Mono'), local('Menlo'), local('Consolas');
+}
+
+body {
+  font-family: 'Berkeley Mono', 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  -webkit-font-smoothing: antialiased;
+}
+
+.deck {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 6vh 8vw;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  pointer-events: none;
+  text-align: center;
+}
+
+.slide.active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.slide-inner {
+  max-width: 960px;
+  width: 100%;
+}
+
+h1 {
+  font-size: clamp(2rem, 5vw, 4rem);
+  font-weight: 700;
+  color: var(--text-bright);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+h2 {
+  font-size: clamp(1.4rem, 3vw, 2.2rem);
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.75rem;
+}
+
+p, li {
+  font-size: clamp(0.85rem, 1.4vw, 1.05rem);
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.tagline {
+  font-size: clamp(1rem, 2vw, 1.4rem);
+  color: var(--text-dim);
+  margin-top: 0.75rem;
+  font-weight: 400;
+}
+
+.subtitle {
+  font-size: clamp(0.9rem, 1.4vw, 1.1rem);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+}
+
+ul {
+  list-style: none;
+  text-align: left;
+  margin: 0 auto;
+  max-width: 720px;
+}
+
+ul li {
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+
+ul li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateY(-50%);
+}
+
+ul.no-dots li::before { display: none; }
+ul.no-dots li { padding-left: 0; }
+
+/* Tables */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  font-size: clamp(0.75rem, 1.2vw, 0.9rem);
+  text-align: left;
+}
+
+th {
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #30363d;
+}
+
+td {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid #21262d;
+  color: var(--text);
+}
+
+tr:last-child td { border-bottom: none; }
+
+.highlight {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.dim { color: var(--text-dim); }
+
+/* Live dot */
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  margin-left: 0.5rem;
+  animation: pulse 2s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.5); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(63, 185, 80, 0); }
+}
+
+/* Pipeline diagram */
+.pipeline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 2rem auto;
+  flex-wrap: wrap;
+  max-width: 880px;
+}
+
+.pipe-node {
+  background: var(--surface);
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  color: var(--text-bright);
+  white-space: nowrap;
+}
+
+.pipe-node.accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pipe-arrow {
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  padding: 0 0.3rem;
+}
+
+.pipe-arrow::after { content: '\2192'; }
+
+/* Metric cards */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+  max-width: 820px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.metric {
+  background: var(--surface);
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 1.2rem;
+  text-align: center;
+}
+
+.metric .value {
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.metric .label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* State machine */
+.state-machine {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  margin: 1.5rem auto;
+  flex-wrap: wrap;
+}
+
+.state {
+  border: 2px solid #30363d;
+  border-radius: 8px;
+  padding: 0.8rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  min-width: 100px;
+}
+
+.state.s-idle { border-color: var(--text-dim); color: var(--text-dim); }
+.state.s-active { border-color: var(--green); color: var(--green); background: rgba(63,185,80,0.08); }
+.state.s-vigilant { border-color: var(--yellow); color: var(--yellow); background: rgba(210,153,34,0.08); }
+
+.state-arrow {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.state-arrow .arrow { font-size: 1.3rem; }
+
+/* Dimension bars */
+.dim-table {
+  text-align: left;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.dim-row {
+  display: grid;
+  grid-template-columns: 110px 60px 1fr 160px;
+  align-items: center;
+  padding: 0.35rem 0;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #21262d;
+}
+
+.dim-row:last-child { border-bottom: none; }
+
+.dim-name { color: var(--text-bright); font-weight: 600; }
+.dim-range { color: var(--text-dim); font-size: 0.75rem; }
+
+.dim-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #21262d;
+  overflow: hidden;
+}
+
+.dim-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+
+.dim-source { color: var(--text-dim); font-size: 0.75rem; }
+
+/* Roadmap */
+.roadmap {
+  text-align: left;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.roadmap-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  font-size: clamp(0.8rem, 1.2vw, 0.95rem);
+}
+
+.roadmap-status {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.roadmap-phase {
+  color: var(--text-dim);
+  font-weight: 600;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+/* Footer nav */
+.nav {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 2rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  z-index: 100;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.nav-help {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 2rem;
+  font-size: 0.65rem;
+  color: #30363d;
+  z-index: 100;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+/* Dashboard features */
+.dash-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  max-width: 700px;
+  margin: 1rem auto 0;
+  text-align: left;
+}
+
+.dash-card {
+  background: var(--surface);
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.dash-card h4 {
+  color: var(--accent);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.4rem;
+}
+
+.dash-card p {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* Cost callout */
+.callout {
+  background: rgba(248, 81, 73, 0.06);
+  border: 1px solid rgba(248, 81, 73, 0.2);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-top: 1.2rem;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+.callout p {
+  font-size: 0.85rem;
+  color: var(--red);
+}
+
+/* End slide */
+.end-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.end-link:hover { border-bottom-color: var(--accent); }
+
+.end-note {
+  margin-top: 2rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  max-width: 560px;
+  line-height: 1.6;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .slide { padding: 4vh 5vw; }
+  .pipeline { gap: 0.3rem; }
+  .pipe-node { padding: 0.4rem 0.6rem; font-size: 0.7rem; }
+  .dash-grid { grid-template-columns: 1fr; }
+  .dim-row { grid-template-columns: 90px 50px 1fr; }
+  .dim-source { display: none; }
+  .state-machine { gap: 0.5rem; }
+  .state { padding: 0.5rem 0.7rem; font-size: 0.75rem; min-width: 70px; }
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="deck">
+
+<!-- Slide 1: Title -->
+<div class="slide active" data-slide="0">
+<div class="slide-inner">
+  <div class="subtitle">operator briefing</div>
+  <h1>listen<span class="live-dot"></span></h1>
+  <p class="tagline">real-time user state observability</p>
+  <p style="margin-top:1.5rem; color:var(--text-dim); font-size:0.9rem;">"Know what your user needs before they ask"</p>
+</div>
+</div>
+
+<!-- Slide 2: The Problem -->
+<div class="slide" data-slide="1">
+<div class="slide-inner">
+  <h3>The Problem</h3>
+  <h2>Voice assistants are blind between commands</h2>
+  <ul>
+    <li>They respond to explicit commands but miss implicit signals</li>
+    <li>Users experiencing distress, burnout, or mood shifts get zero support</li>
+    <li>No continuous understanding of user state across time</li>
+    <li>Reactive by design &mdash; they wait for you to ask</li>
+  </ul>
+</div>
+</div>
+
+<!-- Slide 3: The Solution -->
+<div class="slide" data-slide="2">
+<div class="slide-inner">
+  <h3>The Solution</h3>
+  <h2>Continuous observability, not commands</h2>
+  <ul>
+    <li><span class="highlight">Continuous mic transcription</span> &rarr; real-time intent classification</li>
+    <li><span class="highlight">6-dimensional user state vector</span> tracking mood, energy, engagement, focus, music intent, and wellbeing</li>
+    <li><span class="highlight">Proactive skill activation</span> with hysteresis-based safety gates</li>
+    <li><span class="highlight">All running locally</span> on Apple Silicon &mdash; privacy-first, zero cloud dependencies</li>
+  </ul>
+</div>
+</div>
+
+<!-- Slide 4: Architecture -->
+<div class="slide" data-slide="3">
+<div class="slide-inner">
+  <h3>Architecture</h3>
+  <h2>Pipeline</h2>
+  <div class="pipeline">
+    <div class="pipe-node">Mic</div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-node accent">Moonshine (Swift)</div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-node">Transcript</div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-node accent">Qwen3.5-2B + LoRA</div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-node">Intent Vector</div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-node accent">Skills</div>
+  </div>
+  <div class="metrics" style="margin-top:2rem;">
+    <div class="metric">
+      <div class="value">2B</div>
+      <div class="label">parameters</div>
+    </div>
+    <div class="metric">
+      <div class="value">98.4%</div>
+      <div class="label">accuracy</div>
+    </div>
+    <div class="metric">
+      <div class="value">&lt;400ms</div>
+      <div class="label">inference</div>
+    </div>
+  </div>
+  <p style="margin-top:1.2rem; color:var(--text-dim); font-size:0.8rem;">Single model &middot; On-device &middot; Dual-activation support &middot; Native &lt;tool_call&gt; tokens</p>
+</div>
+</div>
+
+<!-- Slide 5: Intent Vector -->
+<div class="slide" data-slide="4">
+<div class="slide-inner">
+  <h3>Core Abstraction</h3>
+  <h2>The 6-Axis Intent Vector</h2>
+  <div class="dim-table">
+    <div class="dim-row">
+      <div class="dim-name">music</div>
+      <div class="dim-range">[0, 1]</div>
+      <div class="dim-bar"><div class="dim-bar-fill" style="width:72%; background:var(--accent);"></div></div>
+      <div class="dim-source">classifier</div>
+    </div>
+    <div class="dim-row">
+      <div class="dim-name">wellbeing</div>
+      <div class="dim-range">[0, 1]</div>
+      <div class="dim-bar"><div class="dim-bar-fill" style="width:45%; background:var(--red);"></div></div>
+      <div class="dim-source">classifier</div>
+    </div>
+    <div class="dim-row">
+      <div class="dim-name">engagement</div>
+      <div class="dim-range">[0, 1]</div>
+      <div class="dim-bar"><div class="dim-bar-fill" style="width:83%; background:var(--green);"></div></div>
+      <div class="dim-source">chunk density</div>
+    </div>
+    <div class="dim-row">
+      <div class="dim-name">taskFocus</div>
+      <div class="dim-range">[0, 1]</div>
+      <div class="dim-bar"><div class="dim-bar-fill" style="width:36%; background:var(--cyan);"></div></div>
+      <div class="dim-source">match ratio</div>
+    </div>
+    <div class="dim-row">
+      <div class="dim-name">mood</div>
+      <div class="dim-range">[-1, 1]</div>
+      <div class="dim-bar"><div class="dim-bar-fill" style="width:61%; background:var(--purple);"></div></div>
+      <div class="dim-source">NRC VAD valence (44,728 words)</div>
+    </div>
+    <div class="dim-row">
+      <div class="dim-name">energy</div>
+      <div class="dim-range">[0, 1]</div>
+      <div class="dim-bar"><div class="dim-bar-fill" style="width:54%; background:var(--orange);"></div></div>
+      <div class="dim-source">NRC arousal + speech rate</div>
+    </div>
+  </div>
+  <p style="margin-top:1.2rem; color:var(--text-dim); font-size:0.8rem;">Exponential decay with configurable half-lives &middot; Extensible config registry &middot; Adding a dimension = one config entry</p>
+</div>
+</div>
+
+<!-- Slide 6: Activation Gate -->
+<div class="slide" data-slide="5">
+<div class="slide-inner">
+  <h3>Safety Layer</h3>
+  <h2>The Activation Gate</h2>
+  <p style="margin-bottom:1.2rem; color:var(--text-dim); font-size:0.9rem;">Schmitt-trigger hysteresis &mdash; catches what the classifier misses</p>
+  <div class="state-machine">
+    <div class="state s-idle">idle</div>
+    <div class="state-arrow">
+      <span style="font-size:0.65rem;">confidence &ge; 0.55</span>
+      <span class="arrow">&rarr;</span>
+    </div>
+    <div class="state s-active">active</div>
+    <div class="state-arrow">
+      <span style="font-size:0.65rem;">classifier miss</span>
+      <span class="arrow">&rarr;</span>
+    </div>
+    <div class="state s-vigilant">vigilant</div>
+  </div>
+  <p style="margin-top:0.8rem; color:var(--text); font-size:0.85rem;">
+    In <span style="color:var(--yellow); font-weight:600;">vigilant</span> state: promotes target skill at 0.40 confidence<br>
+    Deactivates when vector drops below 0.15 &mdash; hysteresis prevents flicker
+  </p>
+  <div class="callout">
+    <p><strong>Cost-asymmetric:</strong> missing genuine distress costs 10&times; a false positive check-in</p>
+  </div>
+  <p style="margin-top:0.8rem; color:var(--text-dim); font-size:0.8rem;">"I'm just tired" &rarr; classifier catches it &middot; "whatever, it doesn't matter" &rarr; gate catches it</p>
+</div>
+</div>
+
+<!-- Slide 7: Dashboard -->
+<div class="slide" data-slide="6">
+<div class="slide-inner">
+  <h3>Visualization</h3>
+  <h2>Live Dashboard</h2>
+  <div class="dash-grid">
+    <div class="dash-card">
+      <h4>Radar Chart</h4>
+      <p>6-axis, live-updating Canvas API visualization. Adapts automatically to any number of dimensions.</p>
+    </div>
+    <div class="dash-card">
+      <h4>Sparkline Traces</h4>
+      <p>5-minute rolling history per dimension. Ring buffer (300 slots), redrawn on every SSE event.</p>
+    </div>
+    <div class="dash-card">
+      <h4>Decision Log</h4>
+      <p>Per-expert breakdown with skill, action, confidence, and gate promotion indicators.</p>
+    </div>
+    <div class="dash-card">
+      <h4>Gate Status</h4>
+      <p>Real-time indicator: idle / vigilant / active. Shows promotion badge when gate overrides classifier.</p>
+    </div>
+  </div>
+  <p style="margin-top:1.2rem; color:var(--text-dim); font-size:0.8rem;">SSE-driven &middot; Auto-adapts to dimension changes &middot; Zero polling</p>
+</div>
+</div>
+
+<!-- Slide 8: Tech Stack -->
+<div class="slide" data-slide="7">
+<div class="slide-inner">
+  <h3>Implementation</h3>
+  <h2>Technical Stack</h2>
+  <table>
+    <thead>
+      <tr><th>Layer</th><th>Technology</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Transcription</td><td>Moonshine &mdash; Swift, on-device, menu bar app</td></tr>
+      <tr><td>Classification</td><td>Qwen3.5-2B + LoRA (MLX, Apple Silicon native)</td></tr>
+      <tr><td>Sentiment</td><td>NRC VAD Lexicon &mdash; 44,728 words, V/A/D scores</td></tr>
+      <tr><td>Pipeline</td><td>Bun + TypeScript</td></tr>
+      <tr><td>Dashboard</td><td>SSE + Canvas API (vanilla JS)</td></tr>
+      <tr><td>Training</td><td>MLX fine-tuning &mdash; autoresearch pattern</td></tr>
+      <tr><td>Skills</td><td>Apple Music, ElevenLabs, extensible registry</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:1.5rem; color:var(--text-dim); font-size:0.8rem;">
+    LoRA rank 16, 12 layers &middot; 14.6GB peak memory &middot; 8 min training time &middot; Apache 2.0 base model
+  </p>
+</div>
+</div>
+
+<!-- Slide 9: Training Data -->
+<div class="slide" data-slide="8">
+<div class="slide-inner">
+  <h3>Data Strategy</h3>
+  <h2>Training Data Pipeline</h2>
+  <p style="margin-bottom:1.2rem; color:var(--text); font-size:0.9rem;">
+    <span class="highlight">291</span> hand-curated examples &rarr; <span class="highlight">98.4%</span> accuracy today
+  </p>
+  <table>
+    <thead>
+      <tr><th>Dataset</th><th>Size</th><th>Use Case</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>CLINC150-OOS</td><td>23.9k</td><td>150 intents + out-of-scope detection</td></tr>
+      <tr><td>MASSIVE (en-US)</td><td>16.5k</td><td>60 intents with slot annotations</td></tr>
+      <tr><td>BANKING77</td><td>13k</td><td>Pure negatives (should trigger nothing)</td></tr>
+      <tr><td>GoEmotions</td><td>58k</td><td>Mood / wellbeing (27 emotion labels)</td></tr>
+      <tr><td>EmpatheticDialogues</td><td>107k</td><td>Wellbeing / distress patterns</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:1rem; color:var(--text-dim); font-size:0.8rem;">Target: 5&ndash;10k curated examples after filtering &amp; dedup &middot; Stratified splits &middot; Intent-mapped to our tool schema</p>
+</div>
+</div>
+
+<!-- Slide 10: Roadmap -->
+<div class="slide" data-slide="9">
+<div class="slide-inner">
+  <h3>Progress</h3>
+  <h2>Roadmap</h2>
+  <div class="roadmap">
+    <div class="roadmap-item">
+      <div class="roadmap-status" style="color:var(--green);">&#10003;</div>
+      <div class="roadmap-phase">Phase 1</div>
+      <div>Multi-tool classifier &mdash; 98.4% accuracy (63/64)</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="roadmap-status" style="color:var(--green);">&#10003;</div>
+      <div class="roadmap-phase">Phase 2</div>
+      <div>6-axis intent vector + activation gate + live dashboard</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="roadmap-status" style="color:var(--green);">&#10003;</div>
+      <div class="roadmap-phase">Phase 3a</div>
+      <div>NRC VAD Lexicon for mood (valence) and energy (arousal)</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="roadmap-status" style="color:var(--yellow);">&#9679;</div>
+      <div class="roadmap-phase">Phase 3b</div>
+      <div>Dataset augmentation &mdash; 53k+ examples downloaded</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="roadmap-status" style="color:var(--text-dim);">&mdash;</div>
+      <div class="roadmap-phase">Phase 3c</div>
+      <div>Trained mood/wellbeing classifiers (replace heuristics)</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="roadmap-status" style="color:var(--text-dim);">&mdash;</div>
+      <div class="roadmap-phase">Phase 4</div>
+      <div>Steering vectors from model activations</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="roadmap-status" style="color:var(--text-dim);">&mdash;</div>
+      <div class="roadmap-phase">Phase 5</div>
+      <div>Multi-gate architecture &mdash; parameterized gates per skill</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- Slide 11: Key Metrics -->
+<div class="slide" data-slide="10">
+<div class="slide-inner">
+  <h3>By the Numbers</h3>
+  <h2>Key Metrics</h2>
+  <div class="metrics">
+    <div class="metric">
+      <div class="value">98.4%</div>
+      <div class="label">classifier accuracy</div>
+    </div>
+    <div class="metric">
+      <div class="value">6</div>
+      <div class="label">dimensions tracked</div>
+    </div>
+    <div class="metric">
+      <div class="value">44,728</div>
+      <div class="label">sentiment lexicon</div>
+    </div>
+    <div class="metric">
+      <div class="value">&lt;400ms</div>
+      <div class="label">classification latency</div>
+    </div>
+    <div class="metric">
+      <div class="value">2B</div>
+      <div class="label">parameters (MacBook)</div>
+    </div>
+    <div class="metric">
+      <div class="value">0</div>
+      <div class="label">cloud dependencies</div>
+    </div>
+  </div>
+  <p style="margin-top:1.5rem; color:var(--text-dim); font-size:0.85rem;">63/64 eval cases passing &middot; Dual-activation 4/4 &middot; Privacy-first &middot; Runs entirely on Apple Silicon</p>
+</div>
+</div>
+
+<!-- Slide 12: End -->
+<div class="slide" data-slide="11">
+<div class="slide-inner">
+  <div class="subtitle">open source</div>
+  <h1>listen<span class="live-dot"></span></h1>
+  <p style="margin-top:1.5rem; font-size:1rem;">
+    <a href="https://github.com/CestDiego/listen" class="end-link" target="_blank">github.com/CestDiego/listen</a>
+  </p>
+  <p class="end-note">
+    Built with Moonshine, MLX, Bun, and a 2B model that punches above its weight.
+  </p>
+</div>
+</div>
+
+</div><!-- .deck -->
+
+<!-- Navigation indicator -->
+<div class="nav"><span id="nav-current">1</span> / <span id="nav-total">12</span></div>
+<div class="nav-help">&larr; &rarr; navigate &middot; F fullscreen</div>
+
+<script>
+(function() {
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  const navCurrent = document.getElementById('nav-current');
+  const navTotal = document.getElementById('nav-total');
+  navTotal.textContent = total;
+
+  function go(n) {
+    if (n < 0 || n >= total) return;
+    slides[current].classList.remove('active');
+    current = n;
+    slides[current].classList.add('active');
+    navCurrent.textContent = current + 1;
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      go(current + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      go(current - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      go(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      go(total - 1);
+    } else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(function(){});
+      } else {
+        document.exitFullscreen();
+      }
+    }
+  });
+
+  // Touch support
+  let touchStartX = 0;
+  document.addEventListener('touchstart', function(e) {
+    touchStartX = e.changedTouches[0].screenX;
+  });
+  document.addEventListener('touchend', function(e) {
+    const dx = e.changedTouches[0].screenX - touchStartX;
+    if (Math.abs(dx) > 50) {
+      go(dx < 0 ? current + 1 : current - 1);
+    }
+  });
+
+  // Click to advance (not on links)
+  document.addEventListener('click', function(e) {
+    if (e.target.tagName === 'A') return;
+    const x = e.clientX / window.innerWidth;
+    go(x > 0.5 ? current + 1 : current - 1);
+  });
+})();
+</script>
+</body>
+</html>

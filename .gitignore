@@ -22,3 +22,9 @@ experts/models/*/adapters.safetensors/
 
 # NRC VAD Lexicon (non-redistributable — download from saifmohammad.com)
 data/nrc-vad/
+
+# HuggingFace training datasets (large, reproducible via scripts/download-datasets.py)
+data/clinc-oos/
+data/massive/
+data/snips/
+data/banking77/
