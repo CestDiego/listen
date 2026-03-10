@@ -33,3 +33,78 @@ SKILLS = {
         "description": "Negative self-talk, burnout, self-doubt, imposter syndrome",
     },
 }
+
+# ── Multi-tool definitions ─────────────────────────────────────────
+# Used by the unified multi-tool model. Qwen3.5 native tool format.
+TOOL_DEFINITIONS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "music.play",
+            "description": "Start playing music or play a specific song/playlist.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music.pause",
+            "description": "Pause the currently playing music.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music.resume",
+            "description": "Resume paused music.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music.skip",
+            "description": "Skip to the next song/track.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music.previous",
+            "description": "Go back to the previous song/track.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music.volume_up",
+            "description": "Increase the music volume.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music.volume_down",
+            "description": "Decrease the music volume.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wellbeing.check_in",
+            "description": "Triggered when the user expresses first-person negative self-talk, burnout, self-doubt, imposter syndrome, or emotional distress. NOT for third-person reports or casual tiredness.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+]
+
+# Pre-built tools JSON for reference (used by serve_multitool for /health endpoint)
+def tools_json() -> str:
+    """Return TOOL_DEFINITIONS as formatted JSON."""
+    import json
+    return json.dumps(TOOL_DEFINITIONS, indent=2)

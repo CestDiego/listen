@@ -14,6 +14,10 @@ Quick reference for the `listen` project — a live user state observability CLI
 - `start.sh` — Single-command launcher
 - `.knowledge/` — This wiki
 
+## Research
+- `.knowledge/intent-vectors.md` — Continuous intent tracking approaches (EMA embeddings, structured vectors, DST, steering vectors, online learning). Recommended path: accumulate existing expert confidence → add heuristic dimensions → graduate to learned classifiers.
+
 ## Search Keywords
 `mlx`, `qwen`, `lora`, `fine-tuning`, `skill router`, `moonshine`, `transcription`,
-`music skill`, `wellbeing skill`, `apple music`, `elevenlabs`, `eval`, `expert models`
+`music skill`, `wellbeing skill`, `apple music`, `elevenlabs`, `eval`, `expert models`,
+`intent vector`, `intent tracking`, `user state`, `steering vectors`, `dialogue state`
