@@ -64,11 +64,41 @@ Previous 9B router: 86% accuracy, 1.4s latency.
 ```
 OLD (single router):
   Transcript → [9B LM Studio] → {skills: [{skill: "music", action: "play"}]}
-  ~1.4s per call, 86% accuracy
+  ~1,400ms per call, 86% accuracy
 
-NEW (parallel experts):
-  Transcript → [0.8B music LoRA]    → {match: true, action: "play"}     ~278ms
-            → [0.8B wellbeing LoRA] → {match: false}                    ~258ms
-  Run in parallel → merge results
-  ~300ms total, 100% accuracy
+CURRENT (parallel worker processes):
+  Bun → POST /v1/classify → HTTP server → dispatch to worker pool
+                             ├─ [Worker 1: music LoRA]    → {match, action, latency}
+                             └─ [Worker 2: wellbeing LoRA] → {match, action, latency}
+                             ← merge results + wall/sum/gain metrics
+  ~286ms avg, 95.5% accuracy (21/22), ~1.7-2× parallel gain
 ```
+
+### Parallel Inference — MLX on Apple Silicon
+
+**What works:**
+- **Separate processes** — each worker gets its own Metal device context with
+  independent command buffers. Workers run truly in parallel on Apple Silicon.
+- Architecture: HTTP coordinator (no Metal) → mp.Queue → pre-warmed workers
+- Memory: ~1GB per worker (0.8B model), ~2GB total for 2 skills
+
+**What does NOT work:**
+- **Python threading** — MLX shares a single Metal command buffer across threads.
+  Two threads calling `mlx_lm.generate()` simultaneously hit:
+  `-[_MTLCommandBuffer addCompletedHandler:]:1011: failed assertion`
+- **mx.Stream (separate GPU queues)** — `mlx_lm.generate()` internally calls
+  `mx.eval()` which synchronizes globally, so separate streams don't isolate.
+
+**Measured results (2026-03-10):**
+
+| Architecture | Avg latency | Eval time | Parallel gain |
+|-------------|-------------|-----------|---------------|
+| Sequential (single process) | 445ms | 9.8s | 1.0× |
+| Worker processes (parallel) | 286ms | 6.3s | ~1.7-2.0× |
+
+### Remaining Eval Failure
+
+Case: "skip this stupid song, I'm such an idiot for adding it"
+- Music expert misses "skip" — the emotionally loaded phrasing dominates
+- Similar phrases with less personal language ("I feel like a failure") DO trigger both
+- Fix: add adversarial training examples with music commands in emotional sentences
