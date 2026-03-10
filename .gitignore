@@ -1,0 +1,12 @@
+.DS_Store
+node_modules/
+dist/
+.env
+.env.local
+.env.production
+bin/
+.tmp/
+.build/
+.swiftpm/
+*.bak.*
+/tmp/

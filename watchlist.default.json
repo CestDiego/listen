@@ -1,0 +1,116 @@
+{
+  "$schema": "./watchlist.schema.json",
+  "_doc": "Watchlist patterns for listen. Each pattern has triggers (strings or /regex/), a category, severity, cooldown, and response config. Copy to watchlist.json to customize.",
+
+  "patterns": [
+    {
+      "id": "negative-self-talk",
+      "category": "wellbeing",
+      "severity": "high",
+      "triggers": [
+        "i hate myself",
+        "i'm worthless",
+        "i am worthless",
+        "i'm a failure",
+        "i am a failure",
+        "nobody loves me",
+        "no one loves me",
+        "i can't do anything right",
+        "i want to die",
+        "i wish i was dead",
+        "what's the point",
+        "i'm so stupid",
+        "i am so stupid",
+        "i'm not good enough",
+        "i am not good enough",
+        "i don't deserve",
+        "everyone hates me",
+        "i should just give up"
+      ],
+      "cooldownSeconds": 120,
+      "response": {
+        "sound": "Purr",
+        "voice": "Remember — you are valued, you are enough, and you are loved.",
+        "voiceName": "Samantha",
+        "notification": "💛 You matter. You are enough."
+      }
+    },
+    {
+      "id": "self-doubt",
+      "category": "wellbeing",
+      "severity": "medium",
+      "triggers": [
+        "i'm not smart enough",
+        "i am not smart enough",
+        "i'll never be able to",
+        "i always mess up",
+        "i always fail",
+        "why do i even try",
+        "i'm such an idiot",
+        "i am such an idiot"
+      ],
+      "cooldownSeconds": 180,
+      "response": {
+        "sound": "Glass",
+        "voice": "Hey — setbacks are part of growth. You're doing better than you think.",
+        "voiceName": "Samantha",
+        "notification": "🌱 Setbacks are part of growth."
+      }
+    },
+    {
+      "id": "burnout-signals",
+      "category": "wellbeing",
+      "severity": "medium",
+      "triggers": [
+        "i'm so tired of this",
+        "i can't take this anymore",
+        "i need a break",
+        "i'm burning out",
+        "i'm exhausted",
+        "this is killing me"
+      ],
+      "cooldownSeconds": 300,
+      "response": {
+        "sound": "Submarine",
+        "voice": "It's okay to pause. Step away for five minutes — you'll come back sharper.",
+        "voiceName": "Samantha",
+        "notification": "🫁 Take 5. Step away. Breathe."
+      }
+    },
+    {
+      "id": "imposter-syndrome",
+      "category": "wellbeing",
+      "severity": "medium",
+      "triggers": [
+        "they're going to find out",
+        "i don't belong here",
+        "i'm a fraud",
+        "i am a fraud",
+        "i got lucky",
+        "i don't know what i'm doing",
+        "everyone else is smarter"
+      ],
+      "cooldownSeconds": 300,
+      "response": {
+        "sound": "Glass",
+        "voice": "You earned your seat. The fact that you care means you're doing it right.",
+        "voiceName": "Samantha",
+        "notification": "🪞 You earned your seat. Imposter syndrome lies."
+      }
+    },
+    {
+      "id": "example-hedging",
+      "category": "communication",
+      "severity": "low",
+      "triggers": [
+        "i guess we could",
+        "maybe we should probably",
+        "i don't know if this is a good idea but"
+      ],
+      "cooldownSeconds": 60,
+      "response": {
+        "notification": "📎 Notice: hedging language detected. Speak with conviction!"
+      }
+    }
+  ]
+}
