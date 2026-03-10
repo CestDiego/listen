@@ -20,14 +20,14 @@
       "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "accommodator: activate (skip)",
+      "name": "accommodator: skip",
       "transcript": "skip this song please",
-      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "skip" }] }
     },
     {
-      "name": "accommodator: activate (next track)",
+      "name": "accommodator: skip (next track)",
       "transcript": "next track",
-      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "skip" }] }
     },
     {
       "name": "accommodator: deactivate (pause)",
@@ -55,9 +55,9 @@
       "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "accommodator: activate (previous track)",
+      "name": "accommodator: skip (previous track)",
       "transcript": "go back to the last song",
-      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "skip" }] }
     },
     {
       "name": "accommodator: activate (resume)",
@@ -156,11 +156,11 @@
     {"_section": "── Dual activation ─────────────────────────────────────"},
 
     {
-      "name": "dual: activate + self-criticism",
+      "name": "dual: skip + self-criticism",
       "transcript": "skip this stupid song, I'm such an idiot for adding it",
       "expect": {
         "skills": [
-          { "skill": "accommodator", "action": "activate" },
+          { "skill": "accommodator", "action": "skip" },
           { "skill": "wellbeing", "action": "check_in" }
         ]
       }

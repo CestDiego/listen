@@ -108,8 +108,8 @@ MUSIC_TO_ACCOMMODATOR = {
     "play": "accommodator.activate",
     "pause": "accommodator.deactivate",
     "resume": "accommodator.activate",
-    "skip": "accommodator.activate",
-    "previous": "accommodator.activate",
+    "skip": "accommodator.skip",
+    "previous": "accommodator.skip",
     "volume_up": "accommodator.set_target",
     "volume_down": "accommodator.set_target",
 }
@@ -119,23 +119,23 @@ MUSIC_TO_ACCOMMODATOR = {
 # Transcripts where BOTH accommodator and wellbeing should fire.
 
 DUAL_TEMPLATES: list[dict[str, Any]] = [
-    # ── activate + wellbeing (was: skip + wellbeing) ──
+    # ── skip + wellbeing ──
     {"transcript": "skip this stupid song, I'm such an idiot for adding it",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "skip this, it's making me feel worse about myself",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "next song please, I can't listen to this right now, I'm falling apart",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "change the song, this one reminds me of how much I've failed",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "skip this track, I hate everything about myself right now",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "skip it, I can't stand this, I'm so useless",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "next please, this song is making me cry and I already feel worthless",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "skip this garbage, I'm the worst for picking this playlist",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     # ── deactivate + wellbeing (was: pause + wellbeing) ──
     {"transcript": "pause the music, I need a break, I'm burning out",
      "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
@@ -175,11 +175,11 @@ DUAL_TEMPLATES: list[dict[str, Any]] = [
      "tools": ["accommodator.set_target", "wellbeing.check_in"]},
     {"transcript": "crank it up, I need to stop hearing myself think about what a failure I am",
      "tools": ["accommodator.set_target", "wellbeing.check_in"]},
-    # ── activate + wellbeing (was: previous + wellbeing) ──
+    # ── skip + wellbeing (was: previous + wellbeing — track navigation) ──
     {"transcript": "go back to the last song, it was the only thing keeping me from breaking down",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "previous track please, I need that song back, I'm not doing okay",
-     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+     "tools": ["accommodator.skip", "wellbeing.check_in"]},
     # ── activate + wellbeing (was: resume + wellbeing) ──
     {"transcript": "unpause the music, the silence is making me spiral into negative thoughts",
      "tools": ["accommodator.activate", "wellbeing.check_in"]},
@@ -288,6 +288,15 @@ ACCOMMODATOR_POSITIVES: dict[str, list[str]] = {
         "I want some background music",
         "turn on the accommodator",
         "start listening to my mood",
+    ],
+    "skip": [
+        "skip this song",
+        "next track please",
+        "play the next one",
+        "skip to the next song",
+        "I don't like this one, skip it",
+        "next song",
+        "change the track",
     ],
     "deactivate": [
         "stop the music please",

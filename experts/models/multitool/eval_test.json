@@ -1,147 +1,153 @@
 {
   "adapter": "models/multitool/adapters.safetensors",
   "split": "test",
-  "total": 31,
-  "exact_matches": 25,
-  "exact_match_accuracy": 0.8065,
+  "total": 449,
+  "exact_matches": 380,
+  "exact_match_accuracy": 0.8463,
   "negative": {
-    "total": 11,
-    "correct": 10
+    "total": 263,
+    "correct": 261
   },
   "single_tool": {
-    "total": 18,
-    "correct": 15
+    "total": 183,
+    "correct": 118
   },
   "dual_tool": {
-    "total": 2,
-    "correct": 0
+    "total": 3,
+    "correct": 1
   },
   "per_tool": {
-    "music.dislike": {
+    "accommodator.activate": {
+      "tp": 87,
+      "fp": 2,
+      "fn": 38,
+      "precision": 0.9775,
+      "recall": 0.696,
+      "f1": 0.8131
+    },
+    "accommodator.deactivate": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 1,
+      "precision": 1.0,
+      "recall": 0.5,
+      "f1": 0.6667
+    },
+    "accommodator.set_target": {
+      "tp": 27,
+      "fp": 10,
+      "fn": 25,
+      "precision": 0.7297,
+      "recall": 0.5192,
+      "f1": 0.6067
+    },
+    "accommodator.skip": {
       "tp": 0,
-      "fp": 1,
+      "fp": 20,
       "fn": 0,
       "precision": 0.0,
       "recall": 0.0,
       "f1": 0.0
     },
-    "music.pause": {
-      "tp": 1,
-      "fp": 0,
-      "fn": 0,
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1": 1.0
-    },
-    "music.play": {
-      "tp": 5,
-      "fp": 0,
-      "fn": 0,
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1": 1.0
-    },
-    "music.previous": {
-      "tp": 2,
-      "fp": 0,
-      "fn": 1,
-      "precision": 1.0,
-      "recall": 0.6667,
-      "f1": 0.8
-    },
-    "music.skip": {
-      "tp": 4,
-      "fp": 1,
-      "fn": 1,
-      "precision": 0.8,
-      "recall": 0.8,
-      "f1": 0.8
-    },
-    "music.volume_down": {
-      "tp": 1,
-      "fp": 0,
-      "fn": 0,
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1": 1.0
-    },
-    "music.volume_up": {
-      "tp": 1,
-      "fp": 0,
-      "fn": 0,
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1": 1.0
-    },
     "wellbeing.check_in": {
-      "tp": 4,
-      "fp": 1,
-      "fn": 2,
-      "precision": 0.8,
-      "recall": 0.6667,
-      "f1": 0.7273
+      "tp": 6,
+      "fp": 0,
+      "fn": 4,
+      "precision": 1.0,
+      "recall": 0.6,
+      "f1": 0.75
     }
   },
-  "avg_latency_ms": 236.1,
+  "avg_latency_ms": 336.7,
   "errors": [
     {
-      "transcript": "skip this stupid song, I'm such an idiot for adding it",
+      "transcript": "turn it down",
       "expected": [
-        "music.skip"
-      ],
-      "predicted": [
-        "music.skip",
-        "wellbeing.check_in"
-      ],
-      "raw": "<tool_call>\n<function=music.skip>\n</function>\n</tool_call>\n<tool_call>\n<function=wellbeing.check_in>\n</function>\n</tool_call>"
-    },
-    {
-      "transcript": "I don't like this track",
-      "expected": [
-        "music.skip"
-      ],
-      "predicted": [
-        "music.dislike"
-      ],
-      "raw": "<tool_call>\n<function=music.dislike>\n</function>\n</tool_call>"
-    },
-    {
-      "transcript": "change the song, this one reminds me of how much I've failed",
-      "expected": [
-        "music.skip",
-        "wellbeing.check_in"
-      ],
-      "predicted": [
-        "music.skip"
-      ],
-      "raw": "<tool_call>\n<function=music.skip>\n</function>\n</tool_call>"
-    },
-    {
-      "transcript": "turn it down, my head is killing me and I can't cope with anything",
-      "expected": [
-        "music.volume_down",
-        "wellbeing.check_in"
-      ],
-      "predicted": [
-        "music.volume_down"
-      ],
-      "raw": "<tool_call>\n<function=music.volume_down>\n</function>\n</tool_call>"
-    },
-    {
-      "transcript": "let me share my screen for a second",
-      "expected": [],
-      "predicted": [
-        "music.skip"
-      ],
-      "raw": "<tool_call>\n<function=music.skip>\n</function>\n</tool_call>"
-    },
-    {
-      "transcript": "I liked the previous one",
-      "expected": [
-        "music.previous"
+        "accommodator.set_target"
       ],
       "predicted": [],
       "raw": "No tools needed."
+    },
+    {
+      "transcript": "select the r. & b. playlist from the nineties please",
+      "expected": [
+        "accommodator.activate"
+      ],
+      "predicted": [],
+      "raw": "No tools needed."
+    },
+    {
+      "transcript": "I got lucky and it's only a matter of time before they realize",
+      "expected": [
+        "wellbeing.check_in"
+      ],
+      "predicted": [],
+      "raw": "No tools needed."
+    },
+    {
+      "transcript": "opinion petabit",
+      "expected": [
+        "accommodator.set_target"
+      ],
+      "predicted": [],
+      "raw": "No tools needed."
+    },
+    {
+      "transcript": "please put radio in shuffle",
+      "expected": [
+        "accommodator.set_target"
+      ],
+      "predicted": [],
+      "raw": "No tools needed."
+    },
+    {
+      "transcript": "play music composed by some one giving short hint about the album",
+      "expected": [
+        "accommodator.activate"
+      ],
+      "predicted": [
+        "accommodator.set_target"
+      ],
+      "raw": "<tool_call>\n<function=accommodator.set_target>\n</function>\n</tool_call>"
+    },
+    {
+      "transcript": "find some rock",
+      "expected": [
+        "accommodator.activate"
+      ],
+      "predicted": [],
+      "raw": "No tools needed."
+    },
+    {
+      "transcript": "can you move to the next song",
+      "expected": [
+        "accommodator.activate"
+      ],
+      "predicted": [
+        "accommodator.skip"
+      ],
+      "raw": "<tool_call>\n<function=accommodator.skip>\n</function>\n</tool_call>"
+    },
+    {
+      "transcript": "change the song to the next one on this playlist",
+      "expected": [
+        "accommodator.activate"
+      ],
+      "predicted": [
+        "accommodator.skip"
+      ],
+      "raw": "<tool_call>\n<function=accommodator.skip>\n</function>\n</tool_call>"
+    },
+    {
+      "transcript": "hold the music, I need to cry for a second",
+      "expected": [
+        "accommodator.deactivate",
+        "wellbeing.check_in"
+      ],
+      "predicted": [
+        "accommodator.set_target"
+      ],
+      "raw": "<tool_call>\n<function=accommodator.set_target>\n</function>\n</tool_call>"
     }
   ]
 }

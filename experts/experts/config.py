@@ -30,7 +30,7 @@ SKILLS = {
         "description": "Negative self-talk, burnout, self-doubt, imposter syndrome",
     },
     "accommodator": {
-        "actions": ["activate", "deactivate", "set_target"],
+        "actions": ["activate", "deactivate", "skip", "set_target"],
         "description": "Mood-adaptive music and environment adjustment",
     },
 }
@@ -51,6 +51,14 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "accommodator.activate",
             "description": "User wants mood-adaptive music or environment adjustment. Covers requests to play music, start listening, or engage the mood-responsive system.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accommodator.skip",
+            "description": "User wants to skip the current track without stopping or restarting the mood system. Covers: 'skip this song', 'next track', 'play the next one'.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },

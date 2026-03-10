@@ -166,6 +166,9 @@ class AccommodatorEngine {
   private unsubscribe: (() => void) | null = null;
   private steerTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Latest intent vector snapshot — updated by the subscription. */
+  private lastSnapshot: IntentVectorSnapshot | null = null;
+
   constructor(config?: Partial<AccommodatorConfig>) {
     this.config = { ...DEFAULT_ACCOMMODATOR_CONFIG, ...config };
     this.audio = new AudioEngine({
@@ -191,18 +194,26 @@ class AccommodatorEngine {
   /** Subscribe to intent vector updates. Call during init(). */
   subscribe(onUpdate: (fn: IntentVectorListener) => () => void): void {
     this.unsubscribe = onUpdate((snapshot) => {
+      // Always cache the latest snapshot so activate() can read live values
+      this.lastSnapshot = snapshot;
       if (this.iso.status === "inactive") return;
       this.handleIntentUpdate(snapshot);
     });
   }
 
-  /** Activate the Accommodator — start matching phase. */
+  /** Activate the Accommodator — start matching phase.
+   *  If mood/energy/taskFocus are not provided, reads from the last intent vector snapshot. */
   async activate(
-    mood: number,
-    energy: number,
-    taskFocus: number,
+    mood?: number,
+    energy?: number,
+    taskFocus?: number,
     target?: string,
   ): Promise<void> {
+    // Read live values from the intent vector if not explicitly provided
+    const snap = this.lastSnapshot;
+    mood = mood ?? snap?.dimensions.mood ?? 0;
+    energy = energy ?? snap?.dimensions.energy ?? 0.5;
+    taskFocus = taskFocus ?? snap?.dimensions.taskFocus ?? 0;
     const selection = selectQuadrant(mood, energy, taskFocus, this.config);
 
     this.iso.status = "matching";
@@ -246,6 +257,14 @@ class AccommodatorEngine {
     }
     await this.audio.stop();
     this.iso = this.freshISO();
+  }
+
+  /** Skip to the next track without resetting the ISO state machine.
+   *  Returns true if a skip was performed, false if inactive. */
+  async skip(): Promise<boolean> {
+    if (this.iso.status === "inactive") return false;
+    await this.audio.skip();
+    return true;
   }
 
   /** Change the target mood while active. */
@@ -429,7 +448,8 @@ export const accommodatorSkill: Skill = {
     "then gradually steers toward a better state. " +
     "Activate when the user wants ambient/mood music, wants to feel a certain way, " +
     "or asks for help focusing or relaxing. " +
-    "Also handles direct music requests like 'play some music' or 'stop the music'.",
+    "Also handles direct music requests like 'play some music', 'stop the music', " +
+    "or 'skip this song'.",
 
   actions: [
     {
@@ -453,6 +473,12 @@ export const accommodatorSkill: Skill = {
       description: "Stop mood-responsive audio and fade out playback.",
     },
     {
+      name: "skip",
+      description:
+        "Skip to the next track without changing mood or restarting the " +
+        "ISO state machine. Use for 'skip this song', 'next track', etc.",
+    },
+    {
       name: "set_target",
       description:
         "Change the target mood state while the Accommodator is active.",
@@ -473,6 +499,7 @@ export const accommodatorSkill: Skill = {
     /\b(help\s+me|want\s+to|need\s+to)\s+(focus|relax|calm\s+down|energize|feel\s+better)\b/i,
     /\b(mood|feeling|vibe)\b/i,
     /\bplay\s+(me\s+)?some\b/i,
+    /\b(skip|next)\s+(this\s+)?(song|track)\b/i,
   ],
 
   async init() {
@@ -504,11 +531,9 @@ export const accommodatorSkill: Skill = {
 
     switch (action) {
       case "activate": {
-        // Read current intent vector values from the engine state
-        // In production, these come from the IntentVectorStore subscription
-        // For activation, use defaults or target-derived values
+        // Live intent vector values are read from the cached snapshot inside activate()
         const target = params.target;
-        await eng.activate(0, 0.5, 0, target);
+        await eng.activate(undefined, undefined, undefined, target);
         const targetMsg = target ? ` Target: ${target}.` : "";
         return {
           success: true,
@@ -524,6 +549,13 @@ export const accommodatorSkill: Skill = {
           voice: "Stopping mood audio.",
           sound: "Tink",
         };
+      }
+
+      case "skip": {
+        const skipped = await eng.skip();
+        return skipped
+          ? { success: true, voice: "Skipping to next track.", sound: "Pop" }
+          : { success: false, voice: "No music is playing right now." };
       }
 
       case "set_target": {
