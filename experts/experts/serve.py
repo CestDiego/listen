@@ -1,146 +1,205 @@
 """
-Skill expert HTTP server — serves fine-tuned models via a simple REST API.
+Skill expert HTTP server — parallel inference via worker processes.
 
-Runs all skill experts in a single process, each loaded with its LoRA adapter.
-The Bun pipeline calls per-skill endpoints in parallel via Promise.all.
+Architecture:
+  - One HTTP process handles all requests (single-threaded, no Metal usage)
+  - One worker process per skill, each with its own Metal context
+  - Workers are pre-warmed at startup (model loaded, first inference done)
+  - Requests are dispatched to workers via multiprocessing queues
+  - Parallel classification: all workers run simultaneously → ~2× speedup
 
 Endpoints:
-  GET  /health                → {"status": "ok", "skills": [...], "endpoints": [...]}
-  POST /v1/classify/{skill}   → {"skill": "music", "match": true, "action": "play", ...}
-  POST /v1/classify           → {"results": [...]}  (all skills, sequential — for eval/compat)
-
-Threading: Uses ThreadingMixIn so parallel per-skill requests execute concurrently.
-Each skill expert has its own model instance, so thread-safety is per-model.
+  GET  /health                → {"status": "ok", "skills": [...], ...}
+  POST /v1/classify/{skill}   → single skill classification
+  POST /v1/classify           → all skills in parallel (per-expert timing)
 
 Usage:
-  uv run serve --port 8234
-  uv run serve --skills music,wellbeing
+  uv run python -m experts.serve --port 8234
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
+import os
 import time
-from pathlib import Path
 from typing import Any
 
-import mlx.core as mx
-
 from .config import BASE_MODEL, MODELS_DIR, SKILLS
-from .evaluate import parse_output
 
 
-# Global model cache — each skill has its own model, tokenizer, prompt
-_models: dict[str, tuple[Any, Any, str]] = {}
+# ── Worker process ─────────────────────────────────────────────────
 
-
-def load_skill_expert(skill_name: str) -> tuple[Any, Any, str]:
-    """Load a skill expert (base + LoRA adapter). Thread-safe via per-skill lock."""
-    if skill_name in _models:
-        return _models[skill_name]
-
-    from mlx_lm import load
+def _worker_main(
+    skill_name: str,
+    request_queue: Any,
+    result_queue: Any,
+    ready_event: Any,
+) -> None:
+    """
+    Long-lived worker: loads model once, then handles classify requests.
+    Each worker runs in its own process with its own Metal context.
+    """
+    import mlx.core as mx
+    from mlx_lm import load, generate as mlx_generate
     from .generate import system_prompt
+    from .evaluate import parse_output
 
+    pid = os.getpid()
     adapter_path = MODELS_DIR / skill_name / "adapters.safetensors"
 
+    # Load model in this process (gets its own Metal device context)
     if adapter_path.exists():
-        print(f"  Loading {skill_name} expert (with LoRA adapter)...")
         result = load(BASE_MODEL, adapter_path=str(adapter_path))
     else:
-        print(f"  Loading {skill_name} expert (baseline, no adapter)...")
         result = load(BASE_MODEL)
-    model, tokenizer = result[0], result[1]  # type: ignore[index]
-
+    model, tokenizer = result[0], result[1]
     sys_prompt = system_prompt(skill_name)
-    _models[skill_name] = (model, tokenizer, sys_prompt)
-    return model, tokenizer, sys_prompt
-
-
-def classify_single(
-    skill_name: str,
-    transcript: str,
-) -> dict[str, Any]:
-    """
-    Classify a transcript against a single skill expert.
-    Uses a per-skill lock to serialize GPU inference per model.
-    Returns a result dict with match, action, confidence, latency_ms.
-    """
-    from mlx_lm import generate
-
-    if skill_name not in SKILLS:
-        return {
-            "skill": skill_name,
-            "match": False,
-            "status": "error",
-            "error": f"Unknown skill: {skill_name}",
-            "latency_ms": 0,
-        }
-
-    model, tokenizer, sys_prompt = load_skill_expert(skill_name)
 
     def greedy_sampler(logits: Any) -> Any:
         return mx.argmax(logits, axis=-1)
 
-    messages = [
-        {"role": "system", "content": sys_prompt},
-        {"role": "user", "content": transcript},
-    ]
-    prompt = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True,
-    )
+    # Signal ready
+    ready_event.set()
+    print(f"  worker [{pid}] {skill_name} ready")
 
-    start = time.perf_counter()
-    output = generate(
-        model, tokenizer,
-        prompt=prompt,
-        max_tokens=60,
-        sampler=greedy_sampler,
-        verbose=False,
-    )
-    latency = time.perf_counter() - start
+    while True:
+        msg = request_queue.get()
+        if msg is None:  # poison pill → shutdown
+            break
 
-    parsed = parse_output(output)
-    result: dict[str, Any] = {
-        "skill": skill_name,
-        "match": parsed.get("match", False),
-        "status": "ok",
-        "latency_ms": round(latency * 1000, 1),
-    }
-    if parsed.get("match"):
-        result["action"] = parsed.get("action", "")
-        result["confidence"] = parsed.get("confidence", 0.0)
+        transcript = msg["transcript"]
+        request_id = msg["id"]
 
-    return result
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": transcript},
+        ]
+        prompt = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+
+        start = time.perf_counter()
+        output = mlx_generate(
+            model, tokenizer,
+            prompt=prompt,
+            max_tokens=60,
+            sampler=greedy_sampler,
+            verbose=False,
+        )
+        latency_ms = round((time.perf_counter() - start) * 1000, 1)
+
+        parsed = parse_output(output)
+        result_data: dict[str, Any] = {
+            "skill": skill_name,
+            "match": parsed.get("match", False),
+            "status": "ok",
+            "latency_ms": latency_ms,
+            "pid": pid,
+        }
+        if parsed.get("match"):
+            result_data["action"] = parsed.get("action", "")
+            result_data["confidence"] = parsed.get("confidence", 0.0)
+
+        result_queue.put({"id": request_id, **result_data})
 
 
-def classify_all(
-    transcript: str,
-    skills: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """
-    Classify a transcript against all requested skill experts (sequential).
-    Used by the /v1/classify bulk endpoint (eval, backward compat).
-    """
-    if skills is None:
-        skills = list(SKILLS.keys())
+# ── Worker pool manager ────────────────────────────────────────────
 
-    return [classify_single(skill_name, transcript) for skill_name in skills]
+class WorkerPool:
+    """Manages pre-warmed worker processes for parallel classification."""
 
+    def __init__(self, skill_names: list[str]):
+        self.skill_names = skill_names
+        self.workers: dict[str, dict[str, Any]] = {}
+        self._request_counter = 0
+
+    def start(self, timeout: float = 60.0) -> None:
+        """Start all workers and wait for them to be ready."""
+        for skill in self.skill_names:
+            req_q: mp.Queue = mp.Queue()
+            res_q: mp.Queue = mp.Queue()
+            ready = mp.Event()
+            proc = mp.Process(
+                target=_worker_main,
+                args=(skill, req_q, res_q, ready),
+                daemon=True,
+            )
+            proc.start()
+            self.workers[skill] = {
+                "process": proc,
+                "req": req_q,
+                "res": res_q,
+                "ready": ready,
+            }
+
+        # Wait for all workers to load models
+        print(f"  Waiting for {len(self.skill_names)} workers to load models...")
+        for skill in self.skill_names:
+            if not self.workers[skill]["ready"].wait(timeout=timeout):
+                raise TimeoutError(f"Worker {skill} failed to start within {timeout}s")
+
+    def classify_single(self, skill_name: str, transcript: str) -> dict[str, Any]:
+        """Classify via a single skill worker."""
+        if skill_name not in self.workers:
+            return {"skill": skill_name, "match": False, "status": "error",
+                    "error": f"Unknown skill: {skill_name}", "latency_ms": 0}
+
+        self._request_counter += 1
+        req_id = self._request_counter
+        self.workers[skill_name]["req"].put({"transcript": transcript, "id": req_id})
+        return self.workers[skill_name]["res"].get(timeout=30)
+
+    def classify_parallel(self, transcript: str,
+                          skills: list[str] | None = None) -> list[dict[str, Any]]:
+        """
+        Classify against all skills IN PARALLEL.
+        Each worker runs in its own process with its own Metal context.
+        """
+        target_skills = skills or self.skill_names
+        self._request_counter += 1
+        req_id = self._request_counter
+
+        # Dispatch to all workers simultaneously
+        for skill in target_skills:
+            if skill in self.workers:
+                self.workers[skill]["req"].put({"transcript": transcript, "id": req_id})
+
+        # Collect results (order doesn't matter)
+        results = []
+        for skill in target_skills:
+            if skill in self.workers:
+                results.append(self.workers[skill]["res"].get(timeout=30))
+            else:
+                results.append({"skill": skill, "match": False, "status": "error",
+                                "error": f"Unknown skill: {skill}", "latency_ms": 0})
+
+        return results
+
+    def shutdown(self) -> None:
+        """Stop all workers."""
+        for skill in self.skill_names:
+            if skill in self.workers:
+                self.workers[skill]["req"].put(None)
+        for skill in self.skill_names:
+            if skill in self.workers:
+                self.workers[skill]["process"].join(timeout=5)
+
+
+# ── HTTP server ────────────────────────────────────────────────────
 
 def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
-    """Run the threaded HTTP classification server."""
+    """Run the HTTP classification server with parallel worker pool."""
     import http.server
     import socketserver
 
     active_skills = skills or list(SKILLS.keys())
 
-    # Pre-load all skill experts at startup
-    print(f"\nLoading {len(active_skills)} skill expert(s)...")
-    for skill_name in active_skills:
-        load_skill_expert(skill_name)
-    print("All experts loaded.\n")
+    # Start worker pool
+    pool = WorkerPool(active_skills)
+    pool.start()
+    print(f"  All {len(active_skills)} workers ready.\n")
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -149,33 +208,31 @@ def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
                     "status": "ok",
                     "skills": active_skills,
                     "base_model": BASE_MODEL,
+                    "parallel": True,
+                    "workers": len(active_skills),
                     "endpoints": [
                         f"/v1/classify/{s}" for s in active_skills
                     ] + ["/v1/classify"],
                 }
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(response).encode())
+                self._send_json(200, response)
             else:
                 self.send_error(404)
 
         def do_POST(self) -> None:
-            # ── Per-skill endpoint: POST /v1/classify/{skill} ──────
+            # Per-skill endpoint
             for skill_name in active_skills:
                 if self.path == f"/v1/classify/{skill_name}":
-                    self._handle_single_skill(skill_name)
+                    self._handle_single(skill_name)
                     return
 
-            # ── Bulk endpoint: POST /v1/classify ───────────────────
+            # Bulk parallel endpoint
             if self.path == "/v1/classify":
-                self._handle_bulk_classify()
+                self._handle_parallel()
                 return
 
             self.send_error(404)
 
-        def _handle_single_skill(self, skill_name: str) -> None:
-            """Handle a single-skill classification request."""
+        def _handle_single(self, skill_name: str) -> None:
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
 
@@ -184,36 +241,32 @@ def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
                 transcript = req.get("transcript", "")
 
                 if not transcript or len(transcript.strip()) < 10:
-                    result = {
-                        "skill": skill_name,
-                        "match": False,
-                        "status": "too_short",
-                        "latency_ms": 0,
-                    }
-                else:
-                    result = classify_single(skill_name, transcript)
+                    self._send_json(200, {
+                        "skill": skill_name, "match": False,
+                        "status": "too_short", "latency_ms": 0,
+                    })
+                    return
 
-                # Log
-                matched = result.get("match", False)
-                action = result.get("action", "?")
+                result = pool.classify_single(skill_name, transcript)
+                # Remove internal fields
+                result.pop("id", None)
+                result.pop("pid", None)
+
                 ms = result.get("latency_ms", 0)
+                matched = result.get("match", False)
                 icon = "+" if matched else "-"
-                detail = f".{action}" if matched else ""
-                print(f"  [{ms}ms] {icon} {skill_name}{detail} \"{transcript[:50]}\"")
+                action = f".{result.get('action', '?')}" if matched else ""
+                print(f"  [{ms}ms] {icon} {skill_name}{action} \"{transcript[:50]}\"")
 
                 self._send_json(200, result)
 
             except Exception as e:
                 self._send_json(500, {
-                    "skill": skill_name,
-                    "match": False,
-                    "status": "error",
-                    "error": str(e),
-                    "latency_ms": 0,
+                    "skill": skill_name, "match": False,
+                    "status": "error", "error": str(e), "latency_ms": 0,
                 })
 
-        def _handle_bulk_classify(self) -> None:
-            """Handle bulk classification (all skills, sequential)."""
+        def _handle_parallel(self) -> None:
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
 
@@ -223,24 +276,41 @@ def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
                 req_skills = req.get("skills", active_skills)
 
                 if not transcript or len(transcript.strip()) < 10:
-                    response = {"results": [], "reason": "too short"}
+                    self._send_json(200, {"results": [], "reason": "too short"})
+                    return
+
+                wall_start = time.perf_counter()
+                results = pool.classify_parallel(transcript, req_skills)
+                wall_ms = round((time.perf_counter() - wall_start) * 1000, 1)
+
+                # Clean up internal fields
+                for r in results:
+                    r.pop("id", None)
+                    r.pop("pid", None)
+
+                # Compute expert sum for parallelism metric
+                expert_sum_ms = round(
+                    sum(r.get("latency_ms", 0) for r in results), 1
+                )
+                gain = expert_sum_ms / wall_ms if wall_ms > 0 else 1.0
+
+                # Log
+                matched = [r for r in results if r.get("match")]
+                if matched:
+                    skills_str = ", ".join(
+                        f"{r['skill']}.{r.get('action', '?')}" for r in matched
+                    )
+                    print(f"  [{wall_ms}ms wall, {expert_sum_ms}ms sum, "
+                          f"{gain:.1f}× gain] \"{transcript[:50]}\" -> {skills_str}")
                 else:
-                    start = time.perf_counter()
-                    results = classify_all(transcript, req_skills)
-                    total_ms = round((time.perf_counter() - start) * 1000, 1)
+                    print(f"  [{wall_ms}ms wall] \"{transcript[:50]}\" -> (none)")
 
-                    matched = [r for r in results if r.get("match")]
-                    if matched:
-                        skills_str = ", ".join(
-                            f"{r['skill']}.{r.get('action', '?')}" for r in matched
-                        )
-                        print(f"  [{total_ms}ms] \"{transcript[:60]}\" -> {skills_str}")
-                    else:
-                        print(f"  [{total_ms}ms] \"{transcript[:60]}\" -> (none)")
-
-                    response = {"results": results}
-
-                self._send_json(200, response)
+                self._send_json(200, {
+                    "results": results,
+                    "wall_ms": wall_ms,
+                    "expert_sum_ms": expert_sum_ms,
+                    "parallel_gain": round(gain, 2),
+                })
 
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -252,34 +322,31 @@ def run_server(port: int = 8234, skills: list[str] | None = None) -> None:
             self.wfile.write(json.dumps(data).encode())
 
         def log_message(self, format: str, *args: Any) -> None:
-            # Suppress default HTTP logging (we log our own)
-            pass
+            pass  # suppress default HTTP logging
 
-    # Use standard TCPServer — MLX's Metal backend doesn't play well with
-    # ThreadingMixIn due to GPU command buffer sharing. Per-skill endpoints
-    # still work for clarity; the Bun side gets parallelism by calling the
-    # bulk endpoint which returns per-expert timing for full observability.
     socketserver.TCPServer.allow_reuse_address = True
 
     with socketserver.TCPServer(("0.0.0.0", port), Handler) as httpd:
         print(f"Expert server running on http://localhost:{port}")
+        print(f"  Workers: {len(active_skills)} (parallel inference)")
         print(f"  Skills: {', '.join(active_skills)}")
         print(f"  Endpoints:")
         for skill_name in active_skills:
             print(f"    POST /v1/classify/{skill_name}  — {skill_name} expert only")
-        print(f"    POST /v1/classify           — all skills (per-expert timing)")
+        print(f"    POST /v1/classify           — all skills in parallel")
         print(f"    GET  /health                — server status")
-        print(f"  Example:")
-        print(f'    curl -s localhost:{port}/v1/classify -d \'{{"transcript":"play some music"}}\' | python3 -m json.tool')
         print()
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
-            print("\n  Expert server stopped.")
+            print("\n  Shutting down workers...")
+            pool.shutdown()
+            print("  Expert server stopped.")
 
 
 def main() -> None:
     """CLI entry point."""
+    mp.set_start_method("spawn", force=True)
     parser = argparse.ArgumentParser(description="Serve skill expert models")
     parser.add_argument("--port", type=int, default=8234)
     parser.add_argument("--skills", help="Comma-separated skill names")

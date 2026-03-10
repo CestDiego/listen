@@ -28,10 +28,25 @@ class MusicKitService {
     private let port: UInt16 = 3839
     private var authorized = false
 
+    /// Write to a debug log file — NSLog is invisible from terminal on macOS 26.
+    nonisolated private func debugLog(_ msg: String) {
+        let line = "[\(ISO8601DateFormatter().string(from: Date()))] \(msg)\n"
+        let path = "/tmp/listen-musickit.log"
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile()
+            handle.write(line.data(using: .utf8)!)
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: line.data(using: .utf8))
+        }
+    }
+
     func start() {
+        debugLog("start() called")
+        // Start server immediately, auth can happen in parallel
+        startServer()
         Task {
             await requestAuthorization()
-            startServer()
         }
     }
 
@@ -50,27 +65,26 @@ class MusicKitService {
     // MARK: - HTTP Server (NWListener)
 
     private func startServer() {
+        debugLog("startServer() — binding to port \(port)")
         do {
             let params = NWParameters.tcp
-            listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+                debugLog("invalid port \(port)")
+                return
+            }
+            listener = try NWListener(using: params, on: nwPort)
             listener?.newConnectionHandler = { [weak self] conn in
                 Task { @MainActor in
                     self?.handleConnection(conn)
                 }
             }
-            listener?.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    print("[musickit] server ready on :\(self.port)")
-                case .failed(let error):
-                    print("[musickit] server failed: \(error)")
-                default:
-                    break
-                }
+            listener?.stateUpdateHandler = { [weak self] state in
+                self?.debugLog("listener state: \(state)")
             }
             listener?.start(queue: .global(qos: .userInitiated))
+            debugLog("listener.start() called")
         } catch {
-            print("[musickit] failed to start server: \(error)")
+            debugLog("failed to start server: \(error)")
         }
     }
 

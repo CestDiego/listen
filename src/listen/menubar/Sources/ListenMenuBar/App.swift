@@ -615,6 +615,18 @@ class ListenState: ObservableObject {
 struct ListenMenuBarApp: App {
     @StateObject private var state = ListenState()
 
+    init() {
+        // Debug: write directly to file to prove init() runs
+        let msg = "[\(Date())] App.init() called\n"
+        let path = "/tmp/listen-app-init.log"
+        FileManager.default.createFile(atPath: path, contents: msg.data(using: .utf8))
+
+        // Start MusicKit server — dispatched to main actor
+        Task { @MainActor in
+            MusicKitService.shared.start()
+        }
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuContent(state: state)
@@ -624,7 +636,6 @@ struct ListenMenuBarApp: App {
                     // MenuBarLabel's onAppear fires on app launch (it's always visible)
                     state.startTranscribing()
                     state.connectSSE()
-                    state.startMusicKit()
                 }
         }
     }

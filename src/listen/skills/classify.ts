@@ -100,17 +100,14 @@ export async function classifyTranscript(
   }
 }
 
-// ── Bulk classify — single request, per-expert observability ──────
+// ── Parallel classify — workers run concurrently ──────────────────
 //
-// MLX's Metal backend doesn't handle concurrent HTTP requests well
-// (GPU command buffers are shared). Instead we call the bulk endpoint
-// which runs all experts sequentially on the server side but returns
-// per-expert timing. This gives us full observability without the
-// threading instability.
+// The expert server runs one worker process per skill. Each worker
+// has its own Metal context (separate GPU command buffers). When we
+// call POST /v1/classify, all workers classify the transcript
+// simultaneously → real ~2× speedup on Apple Silicon.
 //
-// The "parallelism gain" metric here represents the ratio of
-// summed expert times to wall-clock time (overhead is minimal since
-// it's a single HTTP round-trip).
+// The server returns per-expert timing + wall/sum/gain metrics.
 
 async function fanOutClassify(
   ctx: RouterContext,
@@ -146,7 +143,13 @@ async function fanOutClassify(
       throw new Error(`expert server ${res.status}: ${text.slice(0, 200)}`);
     }
 
-    const data = (await res.json()) as { results?: ExpertServerResult[]; reason?: string };
+    const data = (await res.json()) as {
+      results?: ExpertServerResult[];
+      reason?: string;
+      wall_ms?: number;
+      expert_sum_ms?: number;
+      parallel_gain?: number;
+    };
     clearTimeout(timer);
 
     // Parse per-expert results into our observability format
@@ -157,16 +160,17 @@ async function fanOutClassify(
         action: r.match ? r.action || "" : undefined,
         confidence: r.match ? r.confidence || 0 : undefined,
         expertMs: r.latency_ms || 0,
-        roundTripMs, // same for all since it's a single HTTP call
+        roundTripMs,
         status: (r.status as ExpertClassification["status"]) || "ok",
         error: r.error,
       })
     );
 
+    // Use server-side parallel timing (workers run concurrently)
     const classifyMs = roundTripMs;
-    const expertSumMs = Math.round(
-      classifications.reduce((sum, c) => sum + c.expertMs, 0)
-    );
+    const expertSumMs = data.expert_sum_ms
+      ? Math.round(data.expert_sum_ms)
+      : Math.round(classifications.reduce((sum, c) => sum + c.expertMs, 0));
 
     // Build matches from experts that returned a positive classification
     const matches: SkillMatch[] = classifications

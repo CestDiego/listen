@@ -70,7 +70,7 @@ if [ "$1" = "--build" ]; then
     if xcodebuild -scheme ListenMenuBar -destination 'platform=macOS' build 2>&1 | tail -3 | grep -q "BUILD SUCCEEDED"; then
         ok "build succeeded"
         mkdir -p "$SCRIPT_DIR/bin"
-        BUILT=$(find ~/Library/Developer/Xcode/DerivedData/menubar-*/Build/Products/Debug/ListenMenuBar -maxdepth 0 2>/dev/null | head -1)
+        BUILT=$(ls -t ~/Library/Developer/Xcode/DerivedData/menubar-*/Build/Products/Debug/ListenMenuBar 2>/dev/null | head -1)
         if [ -n "$BUILT" ]; then
             # Create a proper .app bundle (required for MusicKit entitlements)
             APP_BUNDLE="$SCRIPT_DIR/bin/ListenMenuBar.app"
