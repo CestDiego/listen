@@ -2,72 +2,92 @@
   "_doc": "Eval cases for the skill classifier. Each case defines a transcript and what SHOULD or SHOULD NOT fire. Run with: bun run src/listen/skills/eval.ts",
 
   "cases": [
-    {"_section": "── Music: positive ──────────────────────────────────────"},
+    {"_section": "── Accommodator: positive ─────────────────────────────"},
 
     {
-      "name": "music: play",
+      "name": "accommodator: activate (play music)",
       "transcript": "play some music",
-      "expect": { "skills": [{ "skill": "music", "action": "play" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "music: play (real log)",
+      "name": "accommodator: activate (real log)",
       "transcript": "Play music",
-      "expect": { "skills": [{ "skill": "music", "action": "play" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "music: play (real log 2)",
+      "name": "accommodator: activate (real log 2)",
       "transcript": "play some music",
-      "expect": { "skills": [{ "skill": "music", "action": "play" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "music: skip",
+      "name": "accommodator: activate (skip)",
       "transcript": "skip this song please",
-      "expect": { "skills": [{ "skill": "music", "action": "skip" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "music: next track",
+      "name": "accommodator: activate (next track)",
       "transcript": "next track",
-      "expect": { "skills": [{ "skill": "music", "action": "skip" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "music: pause",
+      "name": "accommodator: deactivate (pause)",
       "transcript": "pause the music",
-      "expect": { "skills": [{ "skill": "music", "action": "pause" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "deactivate" }] }
     },
     {
-      "name": "music: volume up",
+      "name": "accommodator: set_target (volume up)",
       "transcript": "turn it up a bit",
-      "expect": { "skills": [{ "skill": "music", "action": "volume_up" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "set_target" }] }
     },
     {
-      "name": "music: volume up (real log)",
+      "name": "accommodator: set_target (volume up real log)",
       "transcript": "Set volume to 100 percent",
-      "expect": { "skills": [{ "skill": "music", "action": "volume_up" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "set_target" }] }
     },
     {
-      "name": "music: volume down",
+      "name": "accommodator: set_target (volume down)",
       "transcript": "volume down please, it's too loud",
-      "expect": { "skills": [{ "skill": "music", "action": "volume_down" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "set_target" }] }
     },
     {
-      "name": "music: play specific song",
+      "name": "accommodator: activate (play specific song)",
       "transcript": "play Bohemian Rhapsody by Queen",
-      "expect": { "skills": [{ "skill": "music", "action": "play" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "music: previous track",
+      "name": "accommodator: activate (previous track)",
       "transcript": "go back to the last song",
-      "expect": { "skills": [{ "skill": "music", "action": "previous" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "music: resume",
+      "name": "accommodator: activate (resume)",
       "transcript": "unpause the music",
-      "expect": { "skills": [{ "skill": "music", "action": "resume" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
     {
-      "name": "music: resume (variant)",
+      "name": "accommodator: activate (continue)",
       "transcript": "continue playing",
-      "expect": { "skills": [{ "skill": "music", "action": "resume" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
+    },
+    {
+      "name": "accommodator: activate (mood request)",
+      "transcript": "play something that matches my mood",
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
+    },
+    {
+      "name": "accommodator: set_target (want calm)",
+      "transcript": "I want to feel calm",
+      "expect": { "skills": [{ "skill": "accommodator", "action": "set_target" }] }
+    },
+    {
+      "name": "accommodator: activate (focus request)",
+      "transcript": "help me focus please",
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
+    },
+    {
+      "name": "accommodator: deactivate (stop music)",
+      "transcript": "stop the music please",
+      "expect": { "skills": [{ "skill": "accommodator", "action": "deactivate" }] }
     },
 
     {"_section": "── Wellbeing: positive ─────────────────────────────────"},
@@ -136,72 +156,72 @@
     {"_section": "── Dual activation ─────────────────────────────────────"},
 
     {
-      "name": "dual: skip + self-criticism",
+      "name": "dual: activate + self-criticism",
       "transcript": "skip this stupid song, I'm such an idiot for adding it",
       "expect": {
         "skills": [
-          { "skill": "music", "action": "skip" },
+          { "skill": "accommodator", "action": "activate" },
           { "skill": "wellbeing", "action": "check_in" }
         ]
       }
     },
     {
-      "name": "dual: pause + burnout",
+      "name": "dual: deactivate + burnout",
       "transcript": "pause the music, I need a break, I'm burning out",
       "expect": {
         "skills": [
-          { "skill": "music", "action": "pause" },
+          { "skill": "accommodator", "action": "deactivate" },
           { "skill": "wellbeing", "action": "check_in" }
         ]
       }
     },
     {
-      "name": "dual: stop + overwhelm",
+      "name": "dual: deactivate + overwhelm",
       "transcript": "just stop everything, I can't deal with this right now, I'm worthless",
       "expect": {
         "skills": [
-          { "skill": "music", "action": "pause" },
+          { "skill": "accommodator", "action": "deactivate" },
           { "skill": "wellbeing", "action": "check_in" }
         ]
       }
     },
     {
-      "name": "dual: play + broken",
+      "name": "dual: activate + broken",
       "transcript": "put on some music, I feel so broken inside",
       "expect": {
         "skills": [
-          { "skill": "music", "action": "play" },
+          { "skill": "accommodator", "action": "activate" },
           { "skill": "wellbeing", "action": "check_in" }
         ]
       }
     },
 
-    {"_section": "── Negative: music-adjacent ────────────────────────────"},
+    {"_section": "── Negative: accommodator-adjacent ─────────────────────"},
 
     {
       "name": "negative: talking about music",
       "transcript": "we discussed the new album at the meeting yesterday",
-      "expect": { "skills": [], "noSkills": ["music"] }
+      "expect": { "skills": [], "noSkills": ["accommodator"] }
     },
     {
       "name": "negative: song in conversation",
       "transcript": "that song was really good, I liked the chorus",
-      "expect": { "skills": [], "noSkills": ["music"] }
+      "expect": { "skills": [], "noSkills": ["accommodator"] }
     },
     {
       "name": "negative: talking about music controller (real log)",
       "transcript": "So the music controller",
-      "expect": { "skills": [], "noSkills": ["music"] }
+      "expect": { "skills": [], "noSkills": ["accommodator"] }
     },
     {
       "name": "negative: song lyrics ambient (real log)",
       "transcript": "The little bird is gonna get happy, happy friends",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: ASR garbled play command (real log)",
       "transcript": "Play for human abruptly by Queen.",
-      "expect": { "skills": [{ "skill": "music", "action": "play" }] }
+      "expect": { "skills": [{ "skill": "accommodator", "action": "activate" }] }
     },
 
     {"_section": "── Negative: wellbeing-adjacent ───────────────────────"},
@@ -262,102 +282,102 @@
     {
       "name": "negative: work discussion",
       "transcript": "let's schedule the standup for tomorrow at ten",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: weather (real log)",
       "transcript": "the weather is nice today",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: goodbye (real log)",
       "transcript": "We'll see you later",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: goodnight (real log)",
       "transcript": "Good night.",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: compliment (real log)",
       "transcript": "Because you're so handsome.",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: tech discussion (real log)",
       "transcript": "This one now i thought you could just see update the Mac Studio with like a m4 m5 zoom as well",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: ASR repetition artifact (real log)",
       "transcript": "March Tarch. It's Tarch. Wait. It's Tarch. It's Tarch.",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: tea request (real log)",
       "transcript": "I need a little bit of turquoise tea.",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: stats discussion (real log)",
       "transcript": "It went from 44 to 77 percent",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: exclamation (real log)",
       "transcript": "Oh my god.",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: ambient fragment (real log)",
       "transcript": "I much appreciated but anyway we've got a lot more coming up in September i mean march",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: children context (real log)",
       "transcript": "Thank you, children!",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: action-sounding phrase",
       "transcript": "let me share my screen for a second",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: action-sounding go ahead",
       "transcript": "go ahead and start the presentation",
-      "expect": { "skills": [], "noSkills": ["music"] }
+      "expect": { "skills": [], "noSkills": ["accommodator"] }
     },
     {
       "name": "negative: hold on",
       "transcript": "hold on, let me pull that up",
-      "expect": { "skills": [], "noSkills": ["music"] }
+      "expect": { "skills": [], "noSkills": ["accommodator"] }
     },
     {
       "name": "negative: let's move on",
       "transcript": "let's move on to the next topic",
-      "expect": { "skills": [], "noSkills": ["music"] }
+      "expect": { "skills": [], "noSkills": ["accommodator"] }
     },
     {
       "name": "negative: skip in conversation",
       "transcript": "let's skip that part and go straight to the demo",
-      "expect": { "skills": [], "noSkills": ["music"] }
+      "expect": { "skills": [], "noSkills": ["accommodator"] }
     },
     {
       "name": "negative: pet command (real log)",
       "transcript": "Rosie the doll, Lola, Lola, put her outside.",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: bag context (real log)",
       "transcript": "This is how I put it in my bag.",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     },
     {
       "name": "negative: frontier discussion (real log)",
       "transcript": "We need frontier.",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
+      "expect": { "skills": [], "noSkills": ["accommodator", "wellbeing"] }
     }
   ]
 }

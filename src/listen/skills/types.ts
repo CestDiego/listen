@@ -36,7 +36,7 @@ export interface SkillResponse {
 }
 
 export interface Skill {
-  /** Unique identifier (e.g. "music", "wellbeing") */
+  /** Unique identifier (e.g. "accommodator", "wellbeing") */
   name: string;
 
   /** Human description for the LLM router prompt */

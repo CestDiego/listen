@@ -31,7 +31,7 @@ const EXPERT_TIMEOUT_MS = 8_000; // per-expert timeout
 
 /** Full observability record for a single expert's classification. */
 export interface ExpertClassification {
-  /** Skill name (e.g. "music", "wellbeing") */
+  /** Skill name (e.g. "accommodator", "wellbeing") */
   skill: string;
   /** Did this expert detect a match? */
   match: boolean;
@@ -228,7 +228,7 @@ function computeInterest(matches: SkillMatch[]): number {
   for (const match of matches) {
     if (match.skill === "wellbeing") {
       interest = Math.max(interest, 8);
-    } else if (match.skill === "music") {
+    } else if (match.skill === "accommodator") {
       interest = Math.max(interest, 5);
     } else {
       interest = Math.max(interest, 4);
