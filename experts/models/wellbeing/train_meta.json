@@ -1,0 +1,15 @@
+{
+  "skill": "wellbeing",
+  "base_model": "Qwen/Qwen3.5-0.8B",
+  "adapter_path": "/Users/diego/Projects/listen/experts/models/wellbeing/adapters.safetensors",
+  "lora_rank": 8,
+  "lora_layers": 8,
+  "learning_rate": 5e-05,
+  "batch_size": 2,
+  "iters": 300,
+  "time_budget": null,
+  "train_examples": 85,
+  "valid_examples": 18,
+  "elapsed_seconds": 255.2,
+  "timestamp": "2026-03-10 01:58:25"
+}

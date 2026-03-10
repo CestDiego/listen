@@ -1,0 +1,17 @@
+[project]
+name = "experts"
+version = "0.1.0"
+description = "Per-skill expert models for listen — fine-tuned on MLX with Qwen3.5"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mlx>=0.31.0",
+    "mlx-lm>=0.31.0",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+generate = "experts.generate:main"
+evaluate = "experts.evaluate:main"
+train = "experts.train:main"
+serve = "experts.serve:main"

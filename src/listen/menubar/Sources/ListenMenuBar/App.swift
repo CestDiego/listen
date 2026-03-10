@@ -3,53 +3,9 @@ import AppKit
 import AVFoundation
 import CoreAudio
 import MoonshineVoice
+import MusicKit
 
-// MARK: - Models (shared with Bun dashboard)
-
-struct Stats: Codable {
-    let totalChunks: Int
-    let transcribedChunks: Int
-    let corrections: Int
-    let watchlistHits: Int
-    let escalations: Int
-    let totalWords: Int
-}
-
-struct TimelineEvent: Codable {
-    let type: String
-    let score: Int?
-    let reason: String?
-    let latencyMs: Int?
-    let patternId: String?
-    let category: String?
-    let severity: String?
-    let trigger: String?
-    let insights: String?
-}
-
-struct TimelineEntry: Codable {
-    let id: String
-    let cycle: Int
-    let timestamp: String
-    let original: String
-    let corrected: String?
-    let text: String
-    let durationSeconds: Int
-    let events: [TimelineEvent]
-}
-
-struct SessionData: Codable {
-    let id: String
-    let startedAt: String
-    let timeline: [TimelineEntry]
-}
-
-struct InitPayload: Codable {
-    let session: SessionData
-    let stats: Stats
-}
-
-// SSE sub-event shapes
+// MARK: - SSE event models (minimal — stats live on the dashboard)
 struct WatchlistSSE: Codable {
     let entryId: String
     let type: String
@@ -453,11 +409,7 @@ class ListenState: ObservableObject {
     }
 
     @Published var status: Status = .disconnected
-    @Published var stats = Stats(
-        totalChunks: 0, transcribedChunks: 0,
-        corrections: 0, watchlistHits: 0,
-        escalations: 0, totalWords: 0
-    )
+    @Published var serverConnected = false
     @Published var recentTranscripts: [(id: String, text: String, time: String)] = []
     @Published var recentAlerts: [(category: String, trigger: String, time: String)] = []
     @Published var currentPartial: String = ""
@@ -470,6 +422,11 @@ class ListenState: ObservableObject {
 
     let engine = TranscriberEngine()
     let deviceManager = AudioDeviceManager()
+    let musicKit = MusicKitService.shared
+
+    func startMusicKit() {
+        musicKit.start()
+    }
 
     func startTranscribing() {
         guard !transcribing else { return }
@@ -509,6 +466,7 @@ class ListenState: ObservableObject {
         transcribing = false
         currentPartial = ""
         status = .disconnected
+        serverConnected = false
     }
 
     /// Restart with a different mic
@@ -552,10 +510,12 @@ class ListenState: ObservableObject {
         do {
             let (stream, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                serverConnected = false
                 scheduleReconnect()
                 return
             }
 
+            serverConnected = true
             if status == .disconnected { status = .listening }
 
             var currentEvent = ""
@@ -575,6 +535,7 @@ class ListenState: ObservableObject {
                 }
             }
         } catch {
+            serverConnected = false
             if !Task.isCancelled {
                 scheduleReconnect()
             }
@@ -594,17 +555,14 @@ class ListenState: ObservableObject {
 
         switch event {
         case "init":
-            if let payload = try? decoder.decode(InitPayload.self, from: jsonData) {
-                stats = payload.stats
-            }
+            print("[listen] SSE connected, received init")
 
         case "stats":
-            if let s = try? decoder.decode(Stats.self, from: jsonData) {
-                stats = s
-            }
+            break // stats live on the dashboard
 
         case "watchlist":
-            if let evt = try? decoder.decode(WatchlistSSE.self, from: jsonData) {
+            do {
+                let evt = try decoder.decode(WatchlistSSE.self, from: jsonData)
                 status = .watchlistHit
                 recentAlerts.insert(
                     (category: evt.category, trigger: evt.trigger, time: nowTime()),
@@ -612,13 +570,19 @@ class ListenState: ObservableObject {
                 )
                 if recentAlerts.count > 5 { recentAlerts.removeLast() }
                 scheduleFade()
+            } catch {
+                print("[listen] SSE watchlist decode error: \(error)")
             }
 
         case "gate":
-            if let evt = try? decoder.decode(GateSSE.self, from: jsonData),
-               evt.type == "gate.escalation" {
-                status = .escalation
-                scheduleFade()
+            do {
+                let evt = try decoder.decode(GateSSE.self, from: jsonData)
+                if evt.type == "gate.escalation" {
+                    status = .escalation
+                    scheduleFade()
+                }
+            } catch {
+                print("[listen] SSE gate decode error: \(error)")
             }
 
         default:
@@ -658,6 +622,7 @@ struct ListenMenuBarApp: App {
                     // MenuBarLabel's onAppear fires on app launch (it's always visible)
                     state.startTranscribing()
                     state.connectSSE()
+                    state.startMusicKit()
                 }
         }
     }
@@ -756,16 +721,17 @@ struct MenuContent: View {
 
             Divider()
 
-            // Stats
+            // Server connection indicator (minimal — stats live on the dashboard)
             if state.status != .disconnected {
-                VStack(alignment: .leading, spacing: 2) {
-                    statRow("chunks", "\(state.stats.transcribedChunks)")
-                    statRow("words", "\(state.stats.totalWords)")
-                    statRow("watchlist", "\(state.stats.watchlistHits)")
-                    statRow("escalations", "\(state.stats.escalations)")
-                    statRow("corrections", "\(state.stats.corrections)")
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(state.serverConnected ? Color.green : Color.orange)
+                        .frame(width: 6, height: 6)
+                    Text(state.serverConnected ? "pipeline connected" : "pipeline offline")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 2)
 
                 Divider()
             }
@@ -864,17 +830,6 @@ struct MenuContent: View {
         case .transcribing: return "transcribing"
         case .watchlistHit: return "watchlist hit"
         case .escalation: return "escalation"
-        }
-    }
-
-    func statRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.secondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
         }
     }
 

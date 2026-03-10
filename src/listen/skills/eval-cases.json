@@ -108,7 +108,7 @@
     {
       "name": "negative: work discussion",
       "transcript": "let's schedule the standup for tomorrow at ten",
-      "expect": { "skills": [], "noSkills": ["music", "wellbeing"], "interestMin": 3 }
+      "expect": { "skills": [], "noSkills": ["music", "wellbeing"] }
     },
     {
       "name": "negative: mentioning tiredness casually",

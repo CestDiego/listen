@@ -1,0 +1,19 @@
+{
+  "skill": "music",
+  "adapter": "/Users/diego/Projects/listen/experts/models/music/adapters.safetensors",
+  "split": "test",
+  "total": 19,
+  "tp": 9,
+  "fp": 0,
+  "tn": 10,
+  "fn": 0,
+  "accuracy": 1.0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1": 1.0,
+  "action_accuracy": 0.7778,
+  "parse_errors": 0,
+  "avg_latency_ms": 278.1,
+  "false_positives": [],
+  "false_negatives": []
+}

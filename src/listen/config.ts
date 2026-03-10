@@ -24,11 +24,8 @@ export interface ListenConfig {
   /** Language hint for whisper (empty = auto-detect) */
   language: string;
 
-  /** Model ID for the gate check (local or opencode model) */
-  gateModel: string;
-
-  /** Local OpenAI-compatible endpoint for gate (e.g. http://localhost:1234). Empty = use opencode. */
-  localGateEndpoint: string;
+  /** MLX expert server endpoint (per-skill fine-tuned models) */
+  expertEndpoint: string;
 
   /** opencode model ID for the full analysis */
   analysisModel: string;
@@ -61,8 +58,7 @@ export const DEFAULT_CONFIG: ListenConfig = {
   chunkSeconds: 5, // 5s chunks for faster reaction
   whisperModel: "mlx-community/whisper-large-v3-turbo",
   language: "",
-  gateModel: "glm-4-9b-0414",
-  localGateEndpoint: "http://localhost:1234", // LM Studio
+  expertEndpoint: "http://localhost:8234", // MLX expert server
   analysisModel: "opencode/claude-sonnet-4-6",
   threshold: 6,
   gateEveryNChunks: 0, // 0 = gate every non-empty chunk (fast with local model)
@@ -146,12 +142,10 @@ export function parseCliArgs(): ListenConfig {
           default: DEFAULT_CONFIG.whisperModel,
         },
         language: { type: "string", default: DEFAULT_CONFIG.language },
-        "gate-model": { type: "string", default: DEFAULT_CONFIG.gateModel },
-        "gate-endpoint": {
+        "expert-endpoint": {
           type: "string",
-          default: DEFAULT_CONFIG.localGateEndpoint,
+          default: DEFAULT_CONFIG.expertEndpoint,
         },
-        "no-local-gate": { type: "boolean", default: false },
         "analysis-model": {
           type: "string",
           default: DEFAULT_CONFIG.analysisModel,
@@ -207,10 +201,7 @@ export function parseCliArgs(): ListenConfig {
     ),
     whisperModel: values["whisper-model"] as string,
     language: values.language as string,
-    gateModel: values["gate-model"] as string,
-    localGateEndpoint: values["no-local-gate"]
-      ? ""
-      : (values["gate-endpoint"] as string),
+    expertEndpoint: values["expert-endpoint"] as string,
     analysisModel: values["analysis-model"] as string,
     threshold: parseThreshold(values.threshold as string),
     gateEveryNChunks: Math.round(
@@ -258,9 +249,7 @@ function printHelp() {
     --chunk <seconds>       Audio chunk duration (default: 5)
     --whisper-model <repo>  mlx_whisper model (default: whisper-large-v3-turbo)
     --language <code>       Language hint for whisper (default: auto-detect)
-    --gate-model <id>       Model for gating (default: glm-4-9b-0414)
-    --gate-endpoint <url>   Local OpenAI API (default: http://localhost:1234)
-    --no-local-gate         Use opencode instead of local endpoint
+    --expert-endpoint <url> MLX expert server (default: http://localhost:8234)
     --analysis-model <id>   Big model for analysis (default: opencode/claude-sonnet-4-6)
     --threshold <0-10>      Gate score to trigger analysis (default: 6)
     --gate-every <N>        Gate every N chunks, 0=every chunk (default: 0)

@@ -94,6 +94,30 @@ export function startDashboard(
         });
       }
 
+      // ── REST: Get router decisions (observability) ─────────
+      if (url.pathname === "/api/decisions" && req.method === "GET") {
+        const decisions = store.getDecisions();
+        const minInterest = Number(url.searchParams.get("minInterest") || 0);
+        const skill = url.searchParams.get("skill");
+        const limit = Number(url.searchParams.get("limit") || 200);
+
+        let filtered = decisions;
+        if (minInterest > 0) {
+          filtered = filtered.filter((d) => d.interest >= minInterest);
+        }
+        if (skill) {
+          filtered = filtered.filter((d) =>
+            d.matches.some((m) => m.skill === skill)
+          );
+        }
+
+        return Response.json({
+          total: decisions.length,
+          filtered: filtered.length,
+          decisions: filtered.slice(-limit),
+        });
+      }
+
       // ── REST: Correct transcription ────────────────────────
       if (url.pathname.startsWith("/api/correct/") && req.method === "PATCH") {
         return handleCorrection(req, url, store);
@@ -198,7 +222,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     --bg: #0d1117; --surface: #161b22; --border: #30363d;
     --text: #e6edf3; --muted: #7d8590; --accent: #58a6ff;
     --green: #3fb950; --yellow: #d29922; --red: #f85149;
-    --purple: #bc8cff; --pink: #f778ba;
+    --purple: #bc8cff; --pink: #f778ba; --orange: #d18616;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -206,23 +230,51 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     background: var(--bg); color: var(--text);
     font-size: 13px; line-height: 1.5;
   }
+
+  /* ── Header ──────────────────────────────────────────────── */
   header {
     position: sticky; top: 0; z-index: 10;
     background: var(--surface); border-bottom: 1px solid var(--border);
-    padding: 12px 20px; display: flex; align-items: center; gap: 16px;
+    padding: 10px 20px;
+  }
+  .header-top {
+    display: flex; align-items: center; gap: 16px;
   }
   header h1 { font-size: 14px; font-weight: 600; }
   .stats {
-    display: flex; gap: 16px; margin-left: auto; font-size: 11px; color: var(--muted);
+    display: flex; gap: 14px; margin-left: auto; font-size: 11px; color: var(--muted);
+    flex-wrap: wrap;
   }
   .stats .stat { display: flex; gap: 4px; align-items: center; }
   .stats .num { color: var(--accent); font-weight: 600; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
+  /* ── Tabs ─────────────────────────────────────────────────── */
+  .tabs {
+    display: flex; gap: 0; margin-top: 8px; border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 6px 16px; font-size: 12px; cursor: pointer; color: var(--muted);
+    border-bottom: 2px solid transparent; transition: all 0.15s;
+    background: none; border-top: none; border-left: none; border-right: none;
+    font-family: inherit;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-badge {
+    font-size: 10px; padding: 0 5px; border-radius: 8px;
+    background: var(--border); color: var(--muted); margin-left: 4px;
+  }
+
+  /* ── Tab Panels ──────────────────────────────────────────── */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Timeline ────────────────────────────────────────────── */
   #timeline {
     padding: 16px 20px; display: flex; flex-direction: column; gap: 2px;
-    max-width: 900px; margin: 0 auto;
+    max-width: 960px; margin: 0 auto; padding-bottom: 100px;
   }
 
   .entry {
@@ -232,6 +284,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   }
   .entry:hover { background: var(--surface); }
   .entry.has-event { background: rgba(88, 166, 255, 0.05); }
+  .entry.has-router { border-left: 2px solid var(--accent); }
+  .entry.has-skill { border-left: 2px solid var(--orange); }
   .entry.has-watchlist { background: rgba(248, 81, 73, 0.08); border-left: 2px solid var(--red); }
   .entry.has-escalation { background: rgba(63, 185, 80, 0.08); border-left: 2px solid var(--green); }
   .entry.is-silence { opacity: 0.3; }
@@ -260,6 +314,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .evt.watchlist { color: var(--red); background: rgba(248, 81, 73, 0.1); }
   .evt.analysis { color: var(--purple); background: rgba(188, 140, 255, 0.1); }
   .evt.correction { color: var(--yellow); font-size: 10px; }
+  .evt.router-evt { color: var(--accent); background: rgba(88, 166, 255, 0.1); cursor: pointer; }
+  .evt.router-evt:hover { background: rgba(88, 166, 255, 0.2); }
+  .evt.skill-evt { color: var(--orange); background: rgba(209, 134, 22, 0.1); }
 
   .badge {
     font-size: 10px; padding: 1px 6px; border-radius: 10px;
@@ -276,37 +333,186 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
   .empty h2 { font-size: 16px; margin-bottom: 8px; }
 
-  /* Scroll to bottom behavior */
-  #timeline { padding-bottom: 100px; }
+  /* ── Interest bar (inline) ───────────────────────────────── */
+  .interest-bar {
+    display: inline-block; width: 60px; height: 6px; border-radius: 3px;
+    background: var(--border); vertical-align: middle; margin: 0 4px;
+    overflow: hidden;
+  }
+  .interest-fill {
+    height: 100%; border-radius: 3px; transition: width 0.3s;
+  }
+
+  /* ── Confidence bar ──────────────────────────────────────── */
+  .confidence-bar {
+    display: inline-block; width: 40px; height: 4px; border-radius: 2px;
+    background: var(--border); vertical-align: middle; margin: 0 3px;
+    overflow: hidden;
+  }
+  .confidence-fill {
+    height: 100%; border-radius: 2px; background: var(--accent);
+  }
+
+  /* ── Context Inspector (expandable) ──────────────────────── */
+  .ctx-inspector {
+    display: none; margin-top: 6px; padding: 10px 12px; border-radius: 6px;
+    background: rgba(88, 166, 255, 0.04); border: 1px solid rgba(88, 166, 255, 0.12);
+    font-size: 11px;
+  }
+  .ctx-inspector.open { display: block; }
+  .ctx-section { margin-bottom: 8px; }
+  .ctx-label {
+    font-size: 10px; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 2px; font-weight: 600;
+  }
+  .ctx-content {
+    color: var(--muted); white-space: pre-wrap; max-height: 120px;
+    overflow-y: auto; padding: 4px 6px; background: var(--bg);
+    border-radius: 4px; border: 1px solid var(--border);
+  }
+  .ctx-skills {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+  }
+  .ctx-skill-card {
+    padding: 4px 8px; border-radius: 4px; font-size: 11px;
+    border: 1px solid var(--border); background: var(--surface);
+  }
+  .ctx-skill-card.executed { border-color: var(--green); }
+  .ctx-skill-card.failed { border-color: var(--red); }
+  .ctx-skill-card .params { color: var(--muted); font-size: 10px; }
+
+  /* ── Decision Log Panel ──────────────────────────────────── */
+  #decisions-panel {
+    max-width: 960px; margin: 0 auto; padding: 16px 20px;
+  }
+  .decision-filters {
+    display: flex; gap: 12px; align-items: center; margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .decision-filters label { font-size: 11px; color: var(--muted); }
+  .decision-filters select, .decision-filters input {
+    font-family: inherit; font-size: 12px; padding: 4px 8px;
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  .decision-card {
+    padding: 10px 14px; border-radius: 6px; margin-bottom: 6px;
+    border: 1px solid var(--border); background: var(--surface);
+    cursor: pointer; transition: border-color 0.15s;
+  }
+  .decision-card:hover { border-color: var(--accent); }
+  .decision-card.expanded { border-color: var(--accent); }
+  .decision-header {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .decision-time { color: var(--muted); font-size: 11px; min-width: 60px; }
+  .decision-interest { font-weight: 600; min-width: 30px; }
+  .decision-reason { color: var(--muted); font-size: 12px; flex: 1; min-width: 0; }
+  .decision-skills-inline {
+    display: flex; gap: 4px; flex-wrap: wrap;
+  }
+  .decision-skill-badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 8px;
+    background: rgba(88, 166, 255, 0.15); color: var(--accent);
+  }
+  .decision-skill-badge.executed { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+  .decision-skill-badge.failed { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+  .decision-latency {
+    font-size: 10px; color: var(--muted);
+  }
+  .decision-detail {
+    display: none; margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .decision-card.expanded .decision-detail { display: block; }
+  .decision-empty {
+    text-align: center; color: var(--muted); padding: 40px 20px; font-size: 12px;
+  }
+
+  /* ── Stats Panel ─────────────────────────────────────────── */
+  .stats-row {
+    display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px;
+    color: var(--muted); padding: 4px 0;
+  }
+  .stats-row .sep { color: var(--border); }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="dot"></div>
-  <h1>🎧 listen</h1>
-  <div class="stats">
-    <div class="stat">chunks <span class="num" id="s-chunks">0</span></div>
-    <div class="stat">words <span class="num" id="s-words">0</span></div>
-    <div class="stat">🫀 <span class="num" id="s-watchlist">0</span></div>
-    <div class="stat">🚀 <span class="num" id="s-escalations">0</span></div>
-    <div class="stat">✏️ <span class="num" id="s-corrections">0</span></div>
+  <div class="header-top">
+    <div class="dot"></div>
+    <h1>listen</h1>
+    <div class="stats">
+      <div class="stat">chunks <span class="num" id="s-chunks">0</span></div>
+      <div class="stat">words <span class="num" id="s-words">0</span></div>
+      <div class="stat">decisions <span class="num" id="s-decisions">0</span></div>
+      <div class="stat">skills <span class="num" id="s-skills">0</span></div>
+      <div class="stat" title="avg router latency">latency <span class="num" id="s-latency">0</span>ms</div>
+      <div class="stat">interest <span class="num" id="s-interest">0</span></div>
+      <div class="stat">watchlist <span class="num" id="s-watchlist">0</span></div>
+      <div class="stat">escalations <span class="num" id="s-escalations">0</span></div>
+    </div>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-tab="timeline">Timeline</button>
+    <button class="tab" data-tab="decisions">Decisions <span class="tab-badge" id="decisions-count">0</span></button>
   </div>
 </header>
 
-<div id="timeline">
-  <div class="empty" id="empty-state">
-    <h2>listening...</h2>
-    <p>Transcriptions will appear here in real time.</p>
+<!-- Timeline Panel -->
+<div class="tab-panel active" id="panel-timeline">
+  <div id="timeline">
+    <div class="empty" id="empty-state">
+      <h2>listening...</h2>
+      <p>Transcriptions will appear here in real time.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Decisions Panel -->
+<div class="tab-panel" id="panel-decisions">
+  <div id="decisions-panel">
+    <div class="decision-filters">
+      <label>min interest:</label>
+      <input type="range" id="filter-interest" min="0" max="10" value="0" style="width:80px">
+      <span id="filter-interest-val" style="font-size:11px;color:var(--accent);width:20px">0</span>
+      <label>skill:</label>
+      <select id="filter-skill"><option value="">all</option></select>
+      <label>show:</label>
+      <select id="filter-show">
+        <option value="all">all</option>
+        <option value="with-skills">with skill matches</option>
+        <option value="escalated">escalated only</option>
+      </select>
+    </div>
+    <div id="decisions-list">
+      <div class="decision-empty">No router decisions yet. Speak and they'll appear here.</div>
+    </div>
   </div>
 </div>
 
 <script>
+// ── State ──────────────────────────────────────────────────────
 const timeline = document.getElementById('timeline');
 const emptyState = document.getElementById('empty-state');
+const decisionsList = document.getElementById('decisions-list');
 let autoScroll = true;
+const allDecisions = [];
+const knownSkills = new Set();
 
-// Track scroll intent
+// ── Tab switching ──────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Scroll ─────────────────────────────────────────────────────
 window.addEventListener('scroll', () => {
   const atBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 100);
   autoScroll = atBottom;
@@ -316,18 +522,48 @@ function scrollBottom() {
   if (autoScroll) window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 }
 
+// ── Stats ──────────────────────────────────────────────────────
 function updateStats(stats) {
-  document.getElementById('s-chunks').textContent = stats.transcribedChunks;
-  document.getElementById('s-words').textContent = stats.totalWords;
-  document.getElementById('s-watchlist').textContent = stats.watchlistHits;
-  document.getElementById('s-escalations').textContent = stats.escalations;
-  document.getElementById('s-corrections').textContent = stats.corrections;
+  document.getElementById('s-chunks').textContent = stats.transcribedChunks || 0;
+  document.getElementById('s-words').textContent = stats.totalWords || 0;
+  document.getElementById('s-watchlist').textContent = stats.watchlistHits || 0;
+  document.getElementById('s-escalations').textContent = stats.escalations || 0;
+  document.getElementById('s-decisions').textContent = stats.totalDecisions || 0;
+  document.getElementById('s-skills').textContent = stats.skillActivations || 0;
+  document.getElementById('s-latency').textContent = stats.avgLatencyMs || 0;
+  document.getElementById('s-interest').textContent = stats.avgInterest || 0;
+  document.getElementById('decisions-count').textContent = stats.totalDecisions || 0;
 }
 
+// ── Helpers ────────────────────────────────────────────────────
 function formatTime(iso) {
   return new Date(iso).toLocaleTimeString('en-US', { hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
 
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function interestColor(n) {
+  if (n >= 7) return 'var(--green)';
+  if (n >= 4) return 'var(--yellow)';
+  if (n >= 1) return 'var(--muted)';
+  return 'var(--border)';
+}
+
+function interestBarHtml(n) {
+  const pct = Math.min(100, n * 10);
+  return '<span class="interest-bar"><span class="interest-fill" style="width:' + pct + '%;background:' + interestColor(n) + '"></span></span>';
+}
+
+function confidenceBarHtml(n) {
+  const pct = Math.min(100, n * 100);
+  return '<span class="confidence-bar"><span class="confidence-fill" style="width:' + pct + '%"></span></span>';
+}
+
+// ── Timeline: Render Entry ─────────────────────────────────────
 function renderEntry(entry) {
   if (emptyState) emptyState.remove();
 
@@ -378,8 +614,6 @@ function renderEntry(entry) {
 
 function updateEntry(el, data) {
   el.className = 'entry' + classesForEntry(data);
-  const eventsDiv = document.getElementById('events-' + data.entryId || data.id);
-  // Just re-render events if we got an update for existing entry
 }
 
 function classesForEntry(entry) {
@@ -387,23 +621,37 @@ function classesForEntry(entry) {
   if (!entry.original && !entry.text) return ' is-silence';
   if (evts.some(e => e.type === 'watchlist')) return ' has-watchlist';
   if (evts.some(e => e.type === 'gate.escalation')) return ' has-escalation';
+  if (evts.some(e => e.type === 'skill')) return ' has-skill';
+  if (evts.some(e => e.type === 'router')) return ' has-router';
   if (evts.some(e => e.type !== 'silence' && e.type !== 'gate')) return ' has-event';
   return '';
 }
 
+// ── Timeline: Render Events ────────────────────────────────────
 function renderEvents(events) {
   return events.map(e => {
     switch (e.type) {
       case 'gate':
-        return '<div class="evt gate">🚦 ' + e.score + '/10 (' + e.latencyMs + 'ms) — ' + escHtml(e.reason) + '</div>';
+        return '<div class="evt gate">score ' + e.score + '/10 (' + e.latencyMs + 'ms) -- ' + escHtml(e.reason) + '</div>';
       case 'gate.escalation':
-        return '<div class="evt escalation">🟢 ' + e.score + '/10 (' + e.latencyMs + 'ms) — ' + escHtml(e.reason) + '</div>';
+        return '<div class="evt escalation">ESCALATED ' + e.score + '/10 (' + e.latencyMs + 'ms) -- ' + escHtml(e.reason) + '</div>';
+      case 'router':
+        return '<div class="evt router-evt" data-entry="' + (e.entryId || '') + '">'
+          + interestBarHtml(e.interest) + ' ' + e.interest + '/10'
+          + ' (' + e.latencyMs + 'ms) -- ' + escHtml(e.reason)
+          + (e.skills && e.skills.length ? ' [' + e.skills.join(', ') + ']' : '')
+          + '</div>';
+      case 'skill':
+        return '<div class="evt skill-evt">'
+          + (e.success ? 'OK' : 'FAIL') + ' ' + e.skill + '.' + e.action
+          + (e.voice ? ' -- "' + escHtml(e.voice) + '"' : '')
+          + '</div>';
       case 'watchlist':
-        return '<div class="evt watchlist">🫀 [' + e.severity + '] ' + e.category + '/' + e.patternId + ' → "' + escHtml(e.trigger) + '"</div>';
+        return '<div class="evt watchlist">[' + e.severity + '] ' + e.category + '/' + e.patternId + ' -- "' + escHtml(e.trigger) + '"</div>';
       case 'analysis':
-        return '<div class="evt analysis">📊 analysis</div><div class="analysis-box">' + escHtml(e.insights) + '</div>';
+        return '<div class="evt analysis">analysis</div><div class="analysis-box">' + escHtml(e.insights) + '</div>';
       case 'correction':
-        return '<div class="evt correction">✏️ corrected: "' + escHtml(e.from).slice(0,40) + '…" → "' + escHtml(e.to).slice(0,40) + '…"</div>';
+        return '<div class="evt correction">corrected: "' + escHtml(e.from).slice(0,40) + '..." -- "' + escHtml(e.to).slice(0,40) + '..."</div>';
       case 'silence': return '';
       default: return '';
     }
@@ -414,26 +662,204 @@ function addEventToEntry(entryId, evt) {
   const eventsDiv = document.getElementById('events-' + entryId);
   if (eventsDiv) {
     eventsDiv.innerHTML += renderEvents([evt]);
-    // Update parent classes
     const parent = eventsDiv.closest('.entry');
-    if (parent && evt.type === 'watchlist') parent.className = 'entry has-watchlist';
-    if (parent && evt.type === 'gate.escalation') parent.className = 'entry has-escalation';
+    if (parent) {
+      if (evt.type === 'watchlist') parent.className = 'entry has-watchlist';
+      else if (evt.type === 'gate.escalation') parent.className = 'entry has-escalation';
+      else if (evt.type === 'skill') parent.className = 'entry has-skill';
+      else if (evt.type === 'router') parent.className = 'entry has-router';
+    }
   }
   scrollBottom();
 }
 
-function escHtml(s) {
-  if (!s) return '';
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+// ── Decision Log ───────────────────────────────────────────────
+function addDecision(d) {
+  allDecisions.push(d);
+  d.matches.forEach(m => {
+    if (!knownSkills.has(m.skill)) {
+      knownSkills.add(m.skill);
+      const opt = document.createElement('option');
+      opt.value = m.skill;
+      opt.textContent = m.skill;
+      document.getElementById('filter-skill').appendChild(opt);
+    }
+  });
+  renderDecisionsList();
 }
+
+function updateDecision(update) {
+  const d = allDecisions.find(d => d.id === update.decisionId);
+  if (!d) return;
+  const m = d.matches.find(m => m.skill === update.skill && m.action === update.action);
+  if (m) {
+    m.executed = update.executed;
+    m.success = update.success;
+    m.voice = update.voice;
+  }
+  // Re-render this card if it exists
+  const card = document.getElementById(d.id);
+  if (card) {
+    const badges = card.querySelector('.decision-skills-inline');
+    if (badges) badges.innerHTML = renderDecisionSkillBadges(d.matches);
+  }
+}
+
+function getFilteredDecisions() {
+  const minInterest = Number(document.getElementById('filter-interest').value);
+  const skill = document.getElementById('filter-skill').value;
+  const show = document.getElementById('filter-show').value;
+
+  return allDecisions.filter(d => {
+    if (d.interest < minInterest) return false;
+    if (skill && !d.matches.some(m => m.skill === skill)) return false;
+    if (show === 'with-skills' && d.matches.length === 0) return false;
+    if (show === 'escalated' && !d.escalated) return false;
+    return true;
+  });
+}
+
+function renderDecisionSkillBadges(matches) {
+  if (!matches.length) return '<span style="color:var(--muted);font-size:10px">no skills matched</span>';
+  return matches.map(m => {
+    let cls = 'decision-skill-badge';
+    if (m.executed && m.success) cls += ' executed';
+    if (m.executed && !m.success) cls += ' failed';
+    return '<span class="' + cls + '">' + m.skill + '.' + m.action
+      + ' ' + (m.confidence * 100).toFixed(0) + '%'
+      + (m.executed ? (m.success ? ' OK' : ' FAIL') : '')
+      + '</span>';
+  }).join('');
+}
+
+function renderDecisionCard(d) {
+  const card = document.createElement('div');
+  card.id = d.id;
+  card.className = 'decision-card';
+
+  const iColor = interestColor(d.interest);
+
+  card.innerHTML =
+    '<div class="decision-header">' +
+      '<span class="decision-time">' + formatTime(d.timestamp) + '</span>' +
+      interestBarHtml(d.interest) +
+      '<span class="decision-interest" style="color:' + iColor + '">' + d.interest + '/10</span>' +
+      '<span class="decision-reason">' + escHtml(d.reason) + '</span>' +
+      '<span class="decision-skills-inline">' + renderDecisionSkillBadges(d.matches) + '</span>' +
+      '<span class="decision-latency">' + d.latencyMs + 'ms</span>' +
+      (d.escalated ? '<span class="badge" style="border-color:var(--green);color:var(--green)">escalated</span>' : '') +
+    '</div>' +
+    '<div class="decision-detail">' +
+      '<div class="ctx-section">' +
+        '<div class="ctx-label">transcript</div>' +
+        '<div class="ctx-content">' + escHtml(d.transcript) + '</div>' +
+      '</div>' +
+      (d.bufferContext ? (
+        '<div class="ctx-section">' +
+          '<div class="ctx-label">buffer context (recent conversation)</div>' +
+          '<div class="ctx-content">' + escHtml(d.bufferContext) + '</div>' +
+        '</div>'
+      ) : '') +
+      (d.skillState ? (
+        '<div class="ctx-section">' +
+          '<div class="ctx-label">skill state</div>' +
+          '<div class="ctx-content">' + escHtml(d.skillState) + '</div>' +
+        '</div>'
+      ) : '') +
+      (d.recentSkills && d.recentSkills.length ? (
+        '<div class="ctx-section">' +
+          '<div class="ctx-label">recent skill history</div>' +
+          '<div class="ctx-content">' + d.recentSkills.map(s =>
+            s.skill + '.' + s.action + ' ' + (s.success ? 'OK' : 'FAIL') + ' (' + s.agoSeconds + 's ago)' + (s.voice ? ' -- "' + escHtml(s.voice) + '"' : '')
+          ).join('\\n') + '</div>' +
+        '</div>'
+      ) : '') +
+      '<div class="ctx-section">' +
+        '<div class="ctx-label">skill matches (' + d.matches.length + ')</div>' +
+        '<div class="ctx-skills">' + d.matches.map(m => {
+          let cls = 'ctx-skill-card';
+          if (m.executed && m.success) cls += ' executed';
+          if (m.executed && !m.success) cls += ' failed';
+          const paramStr = Object.keys(m.params || {}).length
+            ? '<div class="params">' + Object.entries(m.params).map(([k,v]) => k + '=' + escHtml(v)).join(', ') + '</div>'
+            : '';
+          return '<div class="' + cls + '">'
+            + '<strong>' + m.skill + '.' + m.action + '</strong> '
+            + confidenceBarHtml(m.confidence) + ' ' + (m.confidence * 100).toFixed(0) + '%'
+            + (m.executed != null ? '<br>' + (m.success ? '<span style="color:var(--green)">executed OK</span>' : '<span style="color:var(--red)">failed</span>') : '')
+            + (m.voice ? '<br><span style="color:var(--muted)">voice: "' + escHtml(m.voice) + '"</span>' : '')
+            + paramStr
+            + '</div>';
+        }).join('') + '</div>' +
+      '</div>' +
+      '<div class="stats-row">' +
+        '<span>words: ' + d.wordCount + '</span>' +
+        '<span class="sep">|</span>' +
+        '<span>latency: ' + d.latencyMs + 'ms</span>' +
+        '<span class="sep">|</span>' +
+        '<span>escalated: ' + (d.escalated ? 'yes' : 'no') + '</span>' +
+        '<span class="sep">|</span>' +
+        '<span>entry: ' + d.entryId + '</span>' +
+      '</div>' +
+    '</div>';
+
+  card.addEventListener('click', () => card.classList.toggle('expanded'));
+  return card;
+}
+
+function renderDecisionsList() {
+  const filtered = getFilteredDecisions();
+  decisionsList.innerHTML = '';
+
+  if (filtered.length === 0) {
+    decisionsList.innerHTML = '<div class="decision-empty">No decisions match filters.' +
+      (allDecisions.length > 0 ? ' (' + allDecisions.length + ' total)' : '') + '</div>';
+    return;
+  }
+
+  // Render newest first
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    decisionsList.appendChild(renderDecisionCard(filtered[i]));
+  }
+}
+
+// Filters
+document.getElementById('filter-interest').addEventListener('input', (e) => {
+  document.getElementById('filter-interest-val').textContent = e.target.value;
+  renderDecisionsList();
+});
+document.getElementById('filter-skill').addEventListener('change', renderDecisionsList);
+document.getElementById('filter-show').addEventListener('change', renderDecisionsList);
 
 // ── SSE Connection ─────────────────────────────────────────────
 const evtSource = new EventSource('/events');
 
 evtSource.addEventListener('init', (e) => {
   const { session, stats } = JSON.parse(e.data);
+
+  // Clear all state on (re)init — prevents duplicates on SSE reconnect
+  timeline.innerHTML = '';
+  allDecisions.length = 0;
+  knownSkills.clear();
+  document.getElementById('filter-skill').innerHTML = '<option value="">all</option>';
+
   updateStats(stats);
   session.timeline.forEach(renderEntry);
+
+  // Load existing decisions
+  if (session.decisions) {
+    session.decisions.forEach(d => {
+      allDecisions.push(d);
+      d.matches.forEach(m => knownSkills.add(m.skill));
+    });
+    // Rebuild skill filter
+    knownSkills.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = s;
+      document.getElementById('filter-skill').appendChild(opt);
+    });
+    renderDecisionsList();
+  }
 });
 
 evtSource.addEventListener('chunk', (e) => {
@@ -443,6 +869,24 @@ evtSource.addEventListener('chunk', (e) => {
 evtSource.addEventListener('gate', (e) => {
   const data = JSON.parse(e.data);
   addEventToEntry(data.entryId, data);
+});
+
+evtSource.addEventListener('router', (e) => {
+  const data = JSON.parse(e.data);
+  addEventToEntry(data.entryId, data);
+});
+
+evtSource.addEventListener('skill', (e) => {
+  const data = JSON.parse(e.data);
+  addEventToEntry(data.entryId, data);
+});
+
+evtSource.addEventListener('decision', (e) => {
+  addDecision(JSON.parse(e.data));
+});
+
+evtSource.addEventListener('decision_update', (e) => {
+  updateDecision(JSON.parse(e.data));
 });
 
 evtSource.addEventListener('watchlist', (e) => {

@@ -63,6 +63,13 @@ export interface Skill {
   ) => Promise<SkillResponse>;
 
   /**
+   * Optional: return the skill's current state for the router prompt.
+   * Called before each routing cycle so the LLM knows the real world state.
+   * e.g. music returns { status: "playing", track: "Song by Artist" }
+   */
+  getState?: () => Promise<Record<string, string>>;
+
+  /**
    * Optional lifecycle: called once when the skill is registered.
    * Use for loading config files, checking prerequisites, etc.
    */

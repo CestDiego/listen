@@ -10,8 +10,14 @@ import type { Skill, SkillMatch, SkillResponse, RouterContext } from "./types";
 
 // ── Registry ──────────────────────────────────────────────────────
 
+/** Default cooldown per skill.action to prevent feedback loops (ms). */
+const SKILL_COOLDOWN_MS = 8_000;
+
 export class SkillRegistry {
   private skills: Map<string, Skill> = new Map();
+
+  /** Tracks last execution time per "skill.action" key. */
+  private lastExecution: Map<string, number> = new Map();
 
   /** Register a skill. Calls skill.init() if defined. */
   async register(skill: Skill): Promise<void> {
@@ -61,6 +67,30 @@ export class SkillRegistry {
   }
 
   /**
+   * Query the current state of all skills that expose getState().
+   * Returns a formatted string for the router prompt, e.g.:
+   *   music: status=playing, track=Song by Artist
+   */
+  async buildStateContext(): Promise<string> {
+    const lines: string[] = [];
+
+    for (const skill of this.skills.values()) {
+      if (!skill.getState) continue;
+      try {
+        const state = await skill.getState();
+        const pairs = Object.entries(state)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(", ");
+        lines.push(`  ${skill.name}: ${pairs}`);
+      } catch {
+        lines.push(`  ${skill.name}: state unavailable`);
+      }
+    }
+
+    return lines.length > 0 ? lines.join("\n") : "";
+  }
+
+  /**
    * Execute a skill match — looks up the skill and calls its handler.
    * Returns the skill's response, or a failure response if the skill isn't found.
    */
@@ -74,9 +104,25 @@ export class SkillRegistry {
       return { success: false };
     }
 
+    // ── Cooldown guard ─────────────────────────────────────────
+    // Prevents the same skill.action from re-firing within the
+    // cooldown window. This is the hard backstop against feedback
+    // loops where the mic picks up the system's own voice response.
+    const key = `${match.skill}.${match.action}`;
+    const now = Date.now();
+    const last = this.lastExecution.get(key);
+    if (last && now - last < SKILL_COOLDOWN_MS) {
+      const agoSec = ((now - last) / 1000).toFixed(1);
+      console.log(`  ⏳ ${key} on cooldown (fired ${agoSec}s ago, window ${SKILL_COOLDOWN_MS / 1000}s)`);
+      return { success: true, voice: undefined }; // swallow silently
+    }
+
     try {
-      return await skill.handle(match.action, match.params, ctx);
+      const result = await skill.handle(match.action, match.params, ctx);
+      this.lastExecution.set(key, Date.now()); // use completion time, not start time
+      return result;
     } catch (err) {
+      this.lastExecution.set(key, Date.now()); // cooldown even on failure to prevent loops
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ⚠ skill "${match.skill}.${match.action}" failed: ${msg}`);
       return { success: false };

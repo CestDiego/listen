@@ -37,11 +37,65 @@ export type TimelineEvent =
   | { type: "silence" }
   | { type: "correction"; from: string; to: string; at: string };
 
+// ── Router Decision (full observability) ──────────────────────────
+
+/** A matched skill with full details for the decision log. */
+export interface DecisionSkillMatch {
+  skill: string;
+  action: string;
+  params: Record<string, string>;
+  confidence: number;
+  /** Was the skill actually executed (false if on cooldown)? */
+  executed?: boolean;
+  /** Execution result */
+  success?: boolean;
+  /** Voice response if any */
+  voice?: string;
+}
+
+/** Full snapshot of a router decision — the core observability unit. */
+export interface RouterDecision {
+  /** Unique decision id */
+  id: string;
+  /** Timeline entry this decision belongs to */
+  entryId: string;
+  /** When the decision was made */
+  timestamp: string;
+  /** The transcript that was routed */
+  transcript: string;
+  /** Rolling buffer context sent to the router */
+  bufferContext: string;
+  /** Skill state at time of routing (e.g. "music: status=playing") */
+  skillState: string;
+  /** Recent skill executions the router saw */
+  recentSkills: Array<{
+    skill: string;
+    action: string;
+    success: boolean;
+    voice?: string;
+    agoSeconds: number;
+  }>;
+  /** Router result: interest score 0-10 */
+  interest: number;
+  /** Router result: brief reasoning */
+  reason: string;
+  /** All skill matches with full details */
+  matches: DecisionSkillMatch[];
+  /** Router latency in ms */
+  latencyMs: number;
+  /** Whether interest exceeded escalation threshold */
+  escalated: boolean;
+  /** Word count at time of routing */
+  wordCount: number;
+}
+
 export interface Session {
   id: string;
   startedAt: string;
   config: Record<string, unknown>;
   timeline: TimelineEntry[];
+  /** Full router decision log for observability */
+  decisions: RouterDecision[];
 }
 
 // ── SSE subscriber type ────────────────────────────────────────────
@@ -63,6 +117,7 @@ export class SessionStore {
       startedAt: new Date().toISOString(),
       config,
       timeline: [],
+      decisions: [],
     };
   }
 
@@ -133,7 +188,7 @@ export class SessionStore {
     this.debounceSave();
   }
 
-  /** Add a router result to the latest entry. */
+  /** Add a router result to the latest entry (legacy slim method). */
   addRouterResult(
     interest: number,
     reason: string,
@@ -156,6 +211,74 @@ export class SessionStore {
 
     entry.events.push(evt);
     this.notify("router", { entryId: entry.id, ...evt });
+    this.debounceSave();
+  }
+
+  /**
+   * Add a full router decision — the primary observability record.
+   * This captures everything the router saw, decided, and what happened.
+   */
+  addRouterDecision(decision: Omit<RouterDecision, "id">): RouterDecision {
+    const id = `decision-${String(this.session.decisions.length + 1).padStart(5, "0")}`;
+    const full: RouterDecision = { id, ...decision };
+    this.session.decisions.push(full);
+
+    // Also add timeline event (for inline rendering)
+    const entry = this.session.timeline.find((e) => e.id === decision.entryId);
+    if (entry) {
+      const evt: TimelineEvent = {
+        type: "router",
+        interest: decision.interest,
+        reason: decision.reason,
+        skills: decision.matches.map((m) => `${m.skill}.${m.action}`),
+        latencyMs: decision.latencyMs,
+      };
+      entry.events.push(evt);
+      // Notify timeline subscribers so the dashboard shows inline router badge
+      this.notify("router", { entryId: entry.id, ...evt });
+    }
+
+    // Push the full decision via SSE for dashboard observability
+    this.notify("decision", full);
+    this.debounceSave();
+    return full;
+  }
+
+  /**
+   * Update a decision's skill match with execution results.
+   * Called after each skill handler completes.
+   */
+  updateDecisionSkill(
+    decisionId: string,
+    skill: string,
+    action: string,
+    executed: boolean,
+    success: boolean,
+    voice?: string
+  ) {
+    const decision = this.session.decisions.find((d) => d.id === decisionId);
+    if (!decision) return;
+
+    const match = decision.matches.find(
+      (m) => m.skill === skill && m.action === action
+    );
+    if (match) {
+      match.executed = executed;
+      match.success = success;
+      match.voice = voice;
+    } else {
+      console.warn(`  ⚠ updateDecisionSkill: no match for ${skill}.${action} in ${decisionId}`);
+    }
+
+    // Push update via SSE
+    this.notify("decision_update", {
+      decisionId,
+      skill,
+      action,
+      executed,
+      success,
+      voice,
+    });
     this.debounceSave();
   }
 
@@ -233,9 +356,15 @@ export class SessionStore {
     return this.session.timeline.slice(offset, offset + limit);
   }
 
-  /** Get stats. */
+  /** Get all router decisions (for /api/decisions). */
+  getDecisions(): RouterDecision[] {
+    return this.session.decisions;
+  }
+
+  /** Get stats — now includes router decision metrics. */
   getStats() {
     const entries = this.session.timeline;
+    const decisions = this.session.decisions;
     const nonSilent = entries.filter((e) => e.original);
     const corrections = entries.filter((e) => e.corrected !== null);
     const watchlistHits = entries.filter((e) =>
@@ -244,6 +373,18 @@ export class SessionStore {
     const escalations = entries.filter((e) =>
       e.events.some((ev) => ev.type === "gate.escalation")
     );
+
+    // Router decision stats
+    const skillActivations = decisions.reduce(
+      (sum, d) => sum + d.matches.filter((m) => m.executed).length,
+      0
+    );
+    const avgLatency = decisions.length > 0
+      ? Math.round(decisions.reduce((sum, d) => sum + d.latencyMs, 0) / decisions.length)
+      : 0;
+    const avgInterest = decisions.length > 0
+      ? Number((decisions.reduce((sum, d) => sum + d.interest, 0) / decisions.length).toFixed(1))
+      : 0;
 
     return {
       totalChunks: entries.length,
@@ -255,6 +396,14 @@ export class SessionStore {
         (sum, e) => sum + (e.text.trim() ? e.text.trim().split(/\s+/).length : 0),
         0
       ),
+      // Router observability stats
+      totalDecisions: decisions.length,
+      skillActivations,
+      avgLatencyMs: avgLatency,
+      avgInterest,
+      escalationRate: decisions.length > 0
+        ? Number((decisions.filter((d) => d.escalated).length / decisions.length * 100).toFixed(1))
+        : 0,
     };
   }
 

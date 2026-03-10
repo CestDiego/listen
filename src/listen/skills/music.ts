@@ -40,7 +40,7 @@ async function isMusicRunning(): Promise<boolean> {
   }
 }
 
-/** Get the current track info (single osascript call). */
+/** Get the current track info (single osascript call, delimiter-safe). */
 async function getCurrentTrack(): Promise<{
   name: string;
   artist: string;
@@ -48,9 +48,9 @@ async function getCurrentTrack(): Promise<{
 } | null> {
   try {
     const result = await osascript(
-      'tell application "Music" to get {name, artist, album} of current track'
+      'tell application "Music" to (name of current track) & "|||" & (artist of current track) & "|||" & (album of current track)'
     );
-    const [name, artist, album] = result.split(", ");
+    const [name, artist, album] = result.split("|||");
     return { name: name || "Unknown", artist: artist || "Unknown", album: album || "" };
   } catch {
     return null;
@@ -68,7 +68,114 @@ async function getPlayerState(): Promise<string> {
   }
 }
 
+// ── AppleScript string escaping ───────────────────────────────────
+
+function escapeAS(s: string): string {
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t")
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ""); // strip control chars
+}
+
+// ── MusicKit integration (via Swift menu bar app) ─────────────────
+//
+// The Swift app runs a MusicKit HTTP server on port 3839.
+// For catalog tracks, we call it instead of using AppleScript + UI scripting.
+// Flow: iTunes Search API (free, fast) → get catalogId → POST to Swift app → MusicKit plays.
+
+const MUSICKIT_ENDPOINT = "http://localhost:3839";
+const MUSICKIT_TIMEOUT_MS = 5_000;
+
+interface MusicKitPlayResult {
+  success: boolean;
+  track: string;
+  artist: string;
+  album: string;
+  catalogId: string;
+}
+
+/**
+ * Play a song via MusicKit (through the Swift menu bar app).
+ * Accepts either a catalogId (fast) or a search query (search + play).
+ * Returns track info on success, null on failure.
+ */
+async function playViaMusicKit(
+  opts: { catalogId?: string; query?: string }
+): Promise<MusicKitPlayResult | null> {
+  try {
+    const res = await fetch(`${MUSICKIT_ENDPOINT}/api/music/play`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+      signal: AbortSignal.timeout(MUSICKIT_TIMEOUT_MS),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`  ⚠ MusicKit play failed (${res.status}): ${err}`);
+      return null;
+    }
+
+    return (await res.json()) as MusicKitPlayResult;
+  } catch (err) {
+    // MusicKit server not running — fall back gracefully
+    console.log(`  ⚠ MusicKit unavailable: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
+
+/**
+ * Check if the MusicKit server is reachable.
+ */
+async function isMusicKitAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch(`${MUSICKIT_ENDPOINT}/api/music/status`, {
+      signal: AbortSignal.timeout(1_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Search the Apple Music streaming catalog via the iTunes Search API.
+ * Free, no auth, ~150-600ms. Returns the top match or null.
+ */
+async function searchCatalog(
+  query: string
+): Promise<{ trackName: string; artistName: string; trackId: string } | null> {
+  try {
+    const url = `https://itunes.apple.com/search?${new URLSearchParams({
+      term: query,
+      entity: "song",
+      limit: "1",
+      media: "music",
+    })}`;
+
+    const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      resultCount: number;
+      results: { trackName: string; artistName: string; trackId: number }[];
+    };
+
+    if (data.resultCount === 0) return null;
+    const r = data.results[0];
+    return { trackName: r.trackName, artistName: r.artistName, trackId: String(r.trackId) };
+  } catch {
+    return null;
+  }
+}
+
 // ── Action handlers ───────────────────────────────────────────────
+// Every handler checks the current player state BEFORE acting.
+// If the action is redundant (e.g. pausing already-paused music),
+// it returns success: true but skips the command and gives smart feedback.
 
 async function handlePlay(
   params: Record<string, string>
@@ -77,40 +184,84 @@ async function handlePlay(
   const artist = params.artist;
 
   if (song) {
-    // Search and play a specific song
     const searchQuery = artist ? `${song} ${artist}` : song;
+
+    // ── Step 1: Try local library first (fast, ~200ms) ────────
     try {
-      // Search in the user's library first
-      await osascript(
+      const countResult = await osascript(
         `tell application "Music"
           activate
           set searchResults to search playlist "Library" for "${escapeAS(searchQuery)}"
           if (count of searchResults) > 0 then
             play item 1 of searchResults
+            return "found"
           else
-            play
+            return "not_found"
           end if
         end tell`
       );
-      const track = await getCurrentTrack();
+
+      if (countResult === "found") {
+        const track = await getCurrentTrack();
+        return {
+          success: true,
+          voice: track
+            ? `Playing ${track.name} by ${track.artist}`
+            : `Playing ${searchQuery}`,
+          sound: "Pop",
+        };
+      }
+    } catch {
+      // Library search failed — fall through to catalog
+    }
+
+    // ── Step 2: Search Apple Music catalog + play via MusicKit ──
+    console.log(`  🔍 "${searchQuery}" not in library, searching catalog...`);
+
+    // Try MusicKit first (direct search + play, ~1-2s)
+    const mkResult = await playViaMusicKit({ query: searchQuery });
+    if (mkResult?.success) {
       return {
         success: true,
-        voice: track
-          ? `Playing ${track.name} by ${track.artist}`
-          : `Searching for ${searchQuery}`,
+        voice: `Playing ${mkResult.track} by ${mkResult.artist}`,
         sound: "Pop",
       };
-    } catch (err) {
-      // Fallback: just play
-      await osascript('tell application "Music" to play');
-      return {
-        success: true,
-        voice: `I couldn't find "${searchQuery}", but music is playing now.`,
-      };
     }
+
+    // MusicKit unavailable — try iTunes Search API + MusicKit by catalogId
+    const catalogResult = await searchCatalog(searchQuery);
+    if (catalogResult) {
+      console.log(`  🎵 catalog hit: ${catalogResult.trackName} by ${catalogResult.artistName}`);
+      const mkById = await playViaMusicKit({ catalogId: catalogResult.trackId });
+      if (mkById?.success) {
+        return {
+          success: true,
+          voice: `Playing ${mkById.track} by ${mkById.artist}`,
+          sound: "Pop",
+        };
+      }
+    }
+
+    // ── Step 3: Nothing found anywhere — just resume playback ──
+    await osascript('tell application "Music" to play');
+    return {
+      success: true,
+      voice: `I couldn't find "${searchQuery}" in your library or Apple Music.`,
+    };
   }
 
-  // Generic play
+  // Generic play (no specific song) — check if already playing
+  const state = await getPlayerState();
+  if (state === "playing") {
+    const track = await getCurrentTrack();
+    return {
+      success: true,
+      voice: track
+        ? `Already playing ${track.name}`
+        : "Music is already playing",
+    };
+  }
+
   await osascript('tell application "Music" to play');
   const track = await getCurrentTrack();
   return {
@@ -123,6 +274,14 @@ async function handlePlay(
 }
 
 async function handlePause(): Promise<SkillResponse> {
+  const state = await getPlayerState();
+  if (state === "paused" || state === "stopped") {
+    return {
+      success: true,
+      voice: "Music is already paused",
+    };
+  }
+
   await osascript('tell application "Music" to pause');
   return {
     success: true,
@@ -132,6 +291,17 @@ async function handlePause(): Promise<SkillResponse> {
 }
 
 async function handleResume(): Promise<SkillResponse> {
+  const state = await getPlayerState();
+  if (state === "playing") {
+    const track = await getCurrentTrack();
+    return {
+      success: true,
+      voice: track
+        ? `Already playing ${track.name}`
+        : "Music is already playing",
+    };
+  }
+
   await osascript('tell application "Music" to play');
   const track = await getCurrentTrack();
   return {
@@ -142,8 +312,15 @@ async function handleResume(): Promise<SkillResponse> {
 }
 
 async function handleSkip(): Promise<SkillResponse> {
+  const state = await getPlayerState();
+  if (state === "stopped" || state === "paused") {
+    return {
+      success: true,
+      voice: "Nothing is playing right now",
+    };
+  }
+
   await osascript('tell application "Music" to next track');
-  // Small delay for track to change
   await new Promise((r) => setTimeout(r, 500));
   const track = await getCurrentTrack();
   return {
@@ -154,6 +331,14 @@ async function handleSkip(): Promise<SkillResponse> {
 }
 
 async function handlePrevious(): Promise<SkillResponse> {
+  const state = await getPlayerState();
+  if (state === "stopped" || state === "paused") {
+    return {
+      success: true,
+      voice: "Nothing is playing right now",
+    };
+  }
+
   await osascript('tell application "Music" to previous track');
   await new Promise((r) => setTimeout(r, 500));
   const track = await getCurrentTrack();
@@ -168,7 +353,7 @@ async function handleVolumeUp(): Promise<SkillResponse> {
   const current = await osascript(
     'tell application "Music" to get sound volume'
   );
-  const newVol = Math.min(100, (Number(current) || 50) + 15);
+  const newVol = Math.min(100, Number(current) + 15);
   await osascript(
     `tell application "Music" to set sound volume to ${newVol}`
   );
@@ -183,7 +368,7 @@ async function handleVolumeDown(): Promise<SkillResponse> {
   const current = await osascript(
     'tell application "Music" to get sound volume'
   );
-  const newVol = Math.max(0, (Number(current) || 50) - 15);
+  const newVol = Math.max(0, Number(current) - 15);
   await osascript(
     `tell application "Music" to set sound volume to ${newVol}`
   );
@@ -194,32 +379,33 @@ async function handleVolumeDown(): Promise<SkillResponse> {
   };
 }
 
-// ── AppleScript string escaping ───────────────────────────────────
-
-function escapeAS(s: string): string {
-  return s
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\r/g, "\\r")
-    .replace(/\n/g, "\\n")
-    .replace(/\t/g, "\\t")
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ""); // strip control chars
-}
-
 // ── Skill definition ──────────────────────────────────────────────
 
 export const musicSkill: Skill = {
   name: "music",
   description:
-    "Controls Apple Music playback. " +
+    "Controls Apple Music playback. Can search and play any song on Apple Music, not just the user's library. " +
     "Activate when the user gives a clear command to play, pause, skip, or adjust music. " +
-    'Examples: "play some music", "skip this song", "turn it up", "pause the music". ' +
+    'Examples: "play some music", "play Bohemian Rhapsody", "skip this song", "turn it up". ' +
     "Do NOT activate when the user is merely talking ABOUT music.",
+
+  async getState(): Promise<Record<string, string>> {
+    const running = await isMusicRunning();
+    if (!running) return { status: "not running" };
+
+    const state = await getPlayerState();
+    const track = await getCurrentTrack();
+    const result: Record<string, string> = { status: state };
+    if (track) {
+      result.track = `${track.name} by ${track.artist}`;
+    }
+    return result;
+  },
 
   actions: [
     {
       name: "play",
-      description: "Start playing music, optionally a specific song or artist",
+      description: "Start playing music. Can search by song/artist — tries local library first, then Apple Music catalog",
       params: [
         { name: "song", description: "Song name to search for", required: false },
         { name: "artist", description: "Artist name to search for", required: false },

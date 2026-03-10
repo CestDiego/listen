@@ -2,7 +2,7 @@
 /**
  * Skill Router Eval — tests the router against known cases.
  *
- * Runs each test transcript through the REAL router + REAL LM Studio model,
+ * Runs each test transcript through the REAL router + MLX expert server,
  * then checks whether the correct skills fired (and incorrect ones didn't).
  *
  * Usage:
@@ -10,7 +10,7 @@
  *   bun run src/listen/skills/eval.ts --filter "music"   # run matching cases
  *   bun run src/listen/skills/eval.ts --concurrency 3    # parallel calls
  *
- * Requires LM Studio running on localhost:1234.
+ * Requires the expert server running: cd experts && uv run serve
  */
 
 import { readFile } from "fs/promises";
@@ -60,8 +60,7 @@ const { values } = parseArgs({
     filter: { type: "string", default: "" },
     concurrency: { type: "string", default: "1" },
     "cases-file": { type: "string", default: "" },
-    endpoint: { type: "string", default: "http://localhost:1234" },
-    model: { type: "string", default: "glm-4-9b-0414" },
+    endpoint: { type: "string", default: "http://localhost:8234" },
     verbose: { type: "boolean", default: false },
   },
   strict: true,
@@ -255,7 +254,7 @@ function printReport(results: EvalResult[]) {
 
   console.log(`
   ┌─────────────────────────────────────────────┐
-  │         skill router eval results           │
+  │      skill router eval (MLX experts)        │
   ├─────────────────────────────────────────────┤
   │  ${bar}${passed}/${total} passed (${passRate}%)${reset}${" ".repeat(Math.max(0, 29 - `${passed}/${total} passed (${passRate}%)`.length))}│
   │  true positives:  ${tpPassed}/${truePositives.length}${" ".repeat(Math.max(0, 25 - `${tpPassed}/${truePositives.length}`.length))}│
@@ -279,20 +278,23 @@ function printReport(results: EvalResult[]) {
 // ── Main ──────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`\n  🧪 skill router eval`);
-  console.log(`  model:       ${values.model}`);
-  console.log(`  endpoint:    ${values.endpoint}`);
+  const expertEndpoint = values.endpoint as string;
+
+  console.log(`\n  🧪 skill router eval (MLX experts)`);
+  console.log(`  endpoint:    ${expertEndpoint}`);
   console.log(`  concurrency: ${CONCURRENCY}`);
   if (FILTER) console.log(`  filter:      "${FILTER}"`);
   console.log();
 
-  // Check LM Studio is reachable
+  // Check expert server is reachable
   try {
-    const res = await fetch(`${values.endpoint}/v1/models`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`${expertEndpoint}/health`, { signal: AbortSignal.timeout(3000) });
     if (!res.ok) throw new Error(`${res.status}`);
+    const health = (await res.json()) as Record<string, unknown>;
+    console.log(`  ✓ expert server: ${health.skills} skills loaded\n`);
   } catch {
-    console.error(`  ✗ LM Studio not reachable at ${values.endpoint}`);
-    console.error(`  Start LM Studio and load a model first.`);
+    console.error(`  ✗ expert server not reachable at ${expertEndpoint}`);
+    console.error(`  Start it: cd experts && uv run serve`);
     process.exit(1);
   }
 
@@ -311,11 +313,10 @@ async function main() {
     registry["skills"].set(skill.name, skill);
   }
 
-  // Config pointing at LM Studio
+  // Config pointing at expert server
   const config: ListenConfig = {
     ...DEFAULT_CONFIG,
-    gateModel: values.model as string,
-    localGateEndpoint: values.endpoint as string,
+    expertEndpoint,
   };
 
   // Run

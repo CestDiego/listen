@@ -37,6 +37,7 @@ import {
   type RouterResult,
   type SkillExecution,
 } from "./skills";
+import type { DecisionSkillMatch } from "./session";
 
 // ── State ──────────────────────────────────────────────────────────
 
@@ -132,31 +133,58 @@ async function processTranscript(
     recentSkills: recentSkillExecutions.slice(-10), // last 10 executions
   };
 
-  // 2. Route — single LLM call classifies across all skills
+  // 2. Capture skill state BEFORE routing (for observability)
+  const skillState = await registry.buildStateContext();
+
+  // 3. Route — single LLM call classifies across all skills
   const t0 = performance.now();
   const result: RouterResult = await routeTranscript(ctx, registry, config);
   const routerMs = Math.round(performance.now() - t0);
 
-  // 3. Enrich context so skill handlers see the full picture
+  // 4. Enrich context so skill handlers see the full picture
   ctx.routerReason = result.reason;
   ctx.allMatches = result.matches;
 
   const matchedNames = result.matches.map((m) => `${m.skill}.${m.action}`);
   const escalated = result.interest >= config.threshold;
 
-  // Log router result
+  // 5. Record the full router decision for observability
+  const decisionMatches: DecisionSkillMatch[] = result.matches.map((m) => ({
+    skill: m.skill,
+    action: m.action,
+    params: m.params,
+    confidence: m.confidence,
+  }));
+
+  const recentForDecision = (ctx.recentSkills || []).map((s) => ({
+    skill: s.skill,
+    action: s.action,
+    success: s.success,
+    voice: s.voice,
+    agoSeconds: Math.round((Date.now() - s.timestamp.getTime()) / 1000),
+  }));
+
+  const decision = session.addRouterDecision({
+    entryId,
+    timestamp: new Date().toISOString(),
+    transcript: text,
+    bufferContext: ctx.buffer,
+    skillState,
+    recentSkills: recentForDecision,
+    interest: result.interest,
+    reason: result.reason,
+    matches: decisionMatches,
+    latencyMs: routerMs,
+    escalated,
+    wordCount: buffer.wordCount,
+  });
+
+  // Log to JSONL event file
   await events.routerResult(
     result.interest,
     result.reason,
     matchedNames,
     buffer.wordCount
-  );
-  session.addRouterResult(
-    result.interest,
-    result.reason,
-    matchedNames,
-    routerMs,
-    entryId
   );
 
   if (config.verbose) {
@@ -173,7 +201,7 @@ async function processTranscript(
     );
   }
 
-  // 4. Execute matched skills — each handler sees enriched context
+  // 6. Execute matched skills — each handler sees enriched context
   const executionResults: Array<{
     skill: string;
     action: string;
@@ -193,7 +221,7 @@ async function processTranscript(
 
     const skillResult = await registry.execute(match, ctx);
 
-    // 5. Record into skill history for future router calls
+    // 7. Record into skill history for future router calls
     const exec: SkillExecution = {
       skill: match.skill,
       action: match.action,
@@ -210,6 +238,16 @@ async function processTranscript(
       voice: skillResult.voice,
       confidence: match.confidence,
     });
+
+    // Update the decision record with execution results
+    session.updateDecisionSkill(
+      decision.id,
+      match.skill,
+      match.action,
+      true, // executed
+      skillResult.success,
+      skillResult.voice
+    );
 
     // Log skill execution
     await events.skillExecuted(
@@ -238,7 +276,7 @@ async function processTranscript(
     }
   }
 
-  // 6. Escalate to big model analysis if interest is high
+  // 8. Escalate to big model analysis if interest is high
   //    Analyzer gets FULL situation context: transcript + skill actions + results
   if (escalated && running) {
     if (config.verbose) {
@@ -318,10 +356,10 @@ function printBanner(config: ListenConfig): void {
   │  mode          ${config.mode.padEnd(29)}│
   │  audio device  ${audioLine.slice(0, 29).padEnd(29)}│
   │  transcriber   ${transcriber.slice(0, 29).padEnd(29)}│
-  │  router model  ${config.gateModel.padEnd(29)}│
+  │  router        ${"MLX experts (local)".padEnd(29)}│
+  │  expert server ${config.expertEndpoint.padEnd(29)}│
   │  analysis      ${config.analysisModel.padEnd(29)}│
   │  threshold     ${(config.threshold + "/10").padEnd(29)}│
-  │  router        ${(config.localGateEndpoint ? "local → " + config.gateModel : "remote → " + config.gateModel).slice(0, 29).padEnd(29)}│
   │  buffer        ${(config.bufferMinutes + " min").padEnd(29)}│
   │  event log     ${config.eventLogPath.padEnd(29)}│
   ├─────────────────────────────────────────────┤
