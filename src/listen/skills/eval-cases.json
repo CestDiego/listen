@@ -1,0 +1,129 @@
+{
+  "_doc": "Eval cases for the skill router. Each case defines a transcript and what SHOULD or SHOULD NOT fire. Run with: bun run src/listen/skills/eval.ts",
+
+  "cases": [
+    {
+      "name": "music: play",
+      "transcript": "play some music",
+      "expect": { "skills": [{ "skill": "music", "action": "play" }] }
+    },
+    {
+      "name": "music: skip",
+      "transcript": "skip this song please",
+      "expect": { "skills": [{ "skill": "music", "action": "skip" }] }
+    },
+    {
+      "name": "music: next track",
+      "transcript": "next track",
+      "expect": { "skills": [{ "skill": "music", "action": "skip" }] }
+    },
+    {
+      "name": "music: pause",
+      "transcript": "pause the music",
+      "expect": { "skills": [{ "skill": "music", "action": "pause" }] }
+    },
+    {
+      "name": "music: volume up",
+      "transcript": "turn it up a bit",
+      "expect": { "skills": [{ "skill": "music", "action": "volume_up" }] }
+    },
+    {
+      "name": "music: volume down",
+      "transcript": "volume down please, it's too loud",
+      "expect": { "skills": [{ "skill": "music", "action": "volume_down" }] }
+    },
+    {
+      "name": "music: play specific song",
+      "transcript": "play Bohemian Rhapsody by Queen",
+      "expect": { "skills": [{ "skill": "music", "action": "play" }] }
+    },
+    {
+      "name": "music: previous track",
+      "transcript": "go back to the last song",
+      "expect": { "skills": [{ "skill": "music", "action": "previous" }] }
+    },
+
+    {
+      "name": "wellbeing: self-criticism",
+      "transcript": "I'm so stupid, I can't believe I did that",
+      "expect": { "skills": [{ "skill": "wellbeing", "action": "check_in" }] }
+    },
+    {
+      "name": "wellbeing: worthlessness",
+      "transcript": "I'm worthless, nobody even cares",
+      "expect": { "skills": [{ "skill": "wellbeing", "action": "check_in" }] }
+    },
+    {
+      "name": "wellbeing: burnout",
+      "transcript": "I can't take this anymore, I'm completely exhausted",
+      "expect": { "skills": [{ "skill": "wellbeing", "action": "check_in" }] }
+    },
+    {
+      "name": "wellbeing: imposter syndrome",
+      "transcript": "they're going to find out I'm a fraud, I don't belong here",
+      "expect": { "skills": [{ "skill": "wellbeing", "action": "check_in" }] }
+    },
+    {
+      "name": "wellbeing: giving up",
+      "transcript": "why do I even try, I should just give up on everything",
+      "expect": { "skills": [{ "skill": "wellbeing", "action": "check_in" }] }
+    },
+
+    {
+      "name": "dual: music + wellbeing",
+      "transcript": "skip this stupid song, I'm such an idiot for adding it",
+      "expect": {
+        "skills": [
+          { "skill": "music", "action": "skip" },
+          { "skill": "wellbeing", "action": "check_in" }
+        ]
+      }
+    },
+    {
+      "name": "dual: pause + burnout",
+      "transcript": "pause the music, I need a break, I'm burning out",
+      "expect": {
+        "skills": [
+          { "skill": "music", "action": "pause" },
+          { "skill": "wellbeing", "action": "check_in" }
+        ]
+      }
+    },
+
+    {
+      "name": "negative: talking about music",
+      "transcript": "we discussed the new album at the meeting yesterday",
+      "expect": { "skills": [], "noSkills": ["music"] }
+    },
+    {
+      "name": "negative: third person criticism",
+      "transcript": "he said he was stupid for doing that, I disagree though",
+      "expect": { "skills": [], "noSkills": ["wellbeing"] }
+    },
+    {
+      "name": "negative: weather small talk",
+      "transcript": "the weather is really nice today, isn't it",
+      "expect": { "skills": [], "interestMax": 3 }
+    },
+    {
+      "name": "negative: work discussion",
+      "transcript": "let's schedule the standup for tomorrow at ten",
+      "expect": { "skills": [], "noSkills": ["music", "wellbeing"], "interestMin": 3 }
+    },
+    {
+      "name": "negative: mentioning tiredness casually",
+      "transcript": "yeah I'm a bit tired today, had a late night watching TV",
+      "expect": { "skills": [], "noSkills": ["wellbeing"] }
+    },
+    {
+      "name": "negative: song in conversation",
+      "transcript": "that song was really good, I liked the chorus",
+      "expect": { "skills": [], "noSkills": ["music"] }
+    },
+    {
+      "name": "negative: someone else's emotions",
+      "transcript": "she said she was exhausted and wanted to quit her job",
+      "expect": { "skills": [], "noSkills": ["wellbeing"] }
+    }
+  ]
+}

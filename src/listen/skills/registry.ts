@@ -1,0 +1,92 @@
+/**
+ * Skill Registry — manages loaded skills and builds the router prompt.
+ *
+ * Skills self-describe their actions and parameters.
+ * The registry composes these descriptions into a single prompt
+ * that the LLM uses to route transcripts to the right skill(s).
+ */
+
+import type { Skill, SkillMatch, SkillResponse, RouterContext } from "./types";
+
+// ── Registry ──────────────────────────────────────────────────────
+
+export class SkillRegistry {
+  private skills: Map<string, Skill> = new Map();
+
+  /** Register a skill. Calls skill.init() if defined. */
+  async register(skill: Skill): Promise<void> {
+    if (this.skills.has(skill.name)) {
+      console.warn(`  ⚠ skill "${skill.name}" already registered, replacing`);
+    }
+    if (skill.init) {
+      await skill.init();
+    }
+    this.skills.set(skill.name, skill);
+  }
+
+  /** Get a registered skill by name. */
+  get(name: string): Skill | undefined {
+    return this.skills.get(name);
+  }
+
+  /** Get all registered skills. */
+  all(): Skill[] {
+    return Array.from(this.skills.values());
+  }
+
+  /** Number of registered skills. */
+  get size(): number {
+    return this.skills.size;
+  }
+
+  /**
+   * Build the skills description block for the router prompt.
+   * This is what the LLM sees to understand available skills.
+   */
+  buildSkillsPrompt(): string {
+    const lines: string[] = [];
+
+    for (const skill of this.skills.values()) {
+      lines.push(`- ${skill.name}: ${skill.description}`);
+
+      for (const action of skill.actions) {
+        const paramList = action.params?.length
+          ? action.params.map((p) => (p.required ? p.name : `${p.name}?`)).join(", ")
+          : "";
+        lines.push(`    ${action.name}(${paramList}): ${action.description}`);
+      }
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Execute a skill match — looks up the skill and calls its handler.
+   * Returns the skill's response, or a failure response if the skill isn't found.
+   */
+  async execute(
+    match: SkillMatch,
+    ctx: RouterContext
+  ): Promise<SkillResponse> {
+    const skill = this.skills.get(match.skill);
+    if (!skill) {
+      console.error(`  ⚠ skill "${match.skill}" not found in registry`);
+      return { success: false };
+    }
+
+    try {
+      return await skill.handle(match.action, match.params, ctx);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  ⚠ skill "${match.skill}.${match.action}" failed: ${msg}`);
+      return { success: false };
+    }
+  }
+
+  /** Print a summary of registered skills for the banner. */
+  summary(): string {
+    return this.all()
+      .map((s) => `${s.name}(${s.actions.length})`)
+      .join(" ");
+  }
+}

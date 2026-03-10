@@ -39,6 +39,22 @@ export interface GateEvent extends ListenEvent {
   wordCount: number;
 }
 
+export interface RouterEvent extends ListenEvent {
+  type: "router.result";
+  interest: number;
+  reason: string;
+  matchedSkills: string[];
+  wordCount: number;
+}
+
+export interface SkillEvent extends ListenEvent {
+  type: "skill.executed";
+  skill: string;
+  action: string;
+  success: boolean;
+  confidence: number;
+}
+
 export interface AnalysisEvent extends ListenEvent {
   type: "analysis.complete";
   triggerReason: string;
@@ -122,6 +138,42 @@ export class EventEmitter {
     await this.emit(event);
   }
 
+  /** Convenience: emit a router result event. */
+  async routerResult(
+    interest: number,
+    reason: string,
+    matchedSkills: string[],
+    wordCount: number
+  ): Promise<void> {
+    const event: RouterEvent = {
+      timestamp: new Date().toISOString(),
+      type: "router.result",
+      interest,
+      reason,
+      matchedSkills,
+      wordCount,
+    };
+    await this.emit(event);
+  }
+
+  /** Convenience: emit a skill execution event. */
+  async skillExecuted(
+    skill: string,
+    action: string,
+    success: boolean,
+    confidence: number
+  ): Promise<void> {
+    const event: SkillEvent = {
+      timestamp: new Date().toISOString(),
+      type: "skill.executed",
+      skill,
+      action,
+      success,
+      confidence,
+    };
+    await this.emit(event);
+  }
+
   /** Convenience: emit an analysis complete event. */
   async analysisComplete(
     triggerReason: string,
@@ -152,6 +204,10 @@ function eventIcon(type: string): string {
       return "🚦";
     case "gate.escalation":
       return "🚀";
+    case "router.result":
+      return "🧭";
+    case "skill.executed":
+      return "⚡";
     case "analysis.complete":
       return "📊";
     default:
@@ -166,6 +222,10 @@ function eventSummary(event: ListenEvent): string {
     case "gate.check":
     case "gate.escalation":
       return `score=${event.score}/10 — ${event.reason}`;
+    case "router.result":
+      return `interest=${event.interest}/10 skills=[${event.matchedSkills}] — ${event.reason}`;
+    case "skill.executed":
+      return `${event.skill}.${event.action} ${event.success ? "✓" : "✗"}`;
     case "analysis.complete":
       return `(${String(event.insights).length} chars)`;
     default:

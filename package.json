@@ -7,6 +7,8 @@
     "listen:pipe": "bun run src/listen/index.ts --pipe",
     "listen:moonshine": "bun run src/listen/index.ts --moonshine",
     "listen:help": "bun run src/listen/index.ts --help",
+    "eval": "bun run src/listen/skills/eval.ts",
+    "eval:verbose": "bun run src/listen/skills/eval.ts --verbose",
     "listen:menubar:build": "cd src/listen/menubar && xcodebuild -scheme ListenMenuBar -destination 'platform=macOS' build 2>&1 | tail -5",
     "listen:menubar:copy": "cp $(find ~/Library/Developer/Xcode/DerivedData/menubar-*/Build/Products/Debug/ListenMenuBar -maxdepth 0 2>/dev/null | head -1) ./bin/ListenMenuBar && echo 'Copied to ./bin/ListenMenuBar'"
   },

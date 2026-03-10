@@ -12,6 +12,7 @@
  */
 
 import type { WatchlistMatch } from "./watchlist";
+import type { SkillResponse } from "./skills/types";
 
 // ── ElevenLabs config (from env) ───────────────────────────────────
 
@@ -63,6 +64,42 @@ export async function respond(match: WatchlistMatch): Promise<void> {
   // 4. Notification (appears after voice finishes)
   if (response.notification) {
     await sendNotification(`🎧 listen ${label}`, response.notification);
+  }
+}
+
+/**
+ * Execute responses from a skill result.
+ * Same layered pattern: sound → voice → notification.
+ */
+export async function respondToSkill(
+  skillName: string,
+  result: SkillResponse
+): Promise<void> {
+  if (!result.success) return;
+
+  // 1. Sound
+  if (result.sound) {
+    await playSound(result.sound);
+  }
+
+  // 2. Pause between sound and voice
+  if (result.sound && result.voice) {
+    await sleep(600);
+  }
+
+  // 3. Voice
+  if (result.voice) {
+    const spoke = useElevenLabs
+      ? await speakElevenLabs(result.voice)
+      : false;
+    if (!spoke) {
+      await speakMacOS(result.voice);
+    }
+  }
+
+  // 4. Notification
+  if (result.notification) {
+    await sendNotification(`🎧 listen [${skillName}]`, result.notification);
   }
 }
 

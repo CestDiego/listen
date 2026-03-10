@@ -2,13 +2,14 @@
 /**
  * listen — user state observability CLI
  *
- * Records audio → transcribes locally → checks watchlist patterns →
- * gates with cheap model → analyzes with big model →
- * emits structured events → responds (sound, voice, notification).
+ * Records audio → transcribes locally → routes through skill system →
+ * skills take actions (music, wellbeing, etc.) → emits events →
+ * escalates high-interest content to big model for analysis.
  *
  * Usage:
  *   bun listen              # live mic mode
  *   bun listen --pipe       # paste/pipe transcripts via stdin
+ *   bun listen --moonshine  # receive from Moonshine menu bar app
  *
  * Events:
  *   tail -f /tmp/listen-events.jsonl   # consume from another process
@@ -22,19 +23,36 @@ import {
 import { TranscriptBuffer } from "./buffer";
 import { initRecorder, recordChunk, cleanupChunk } from "./recorder";
 import { transcribe } from "./transcriber";
-import { runGate } from "./gate";
 import { analyze } from "./analyzer";
 import { notify } from "./notifier";
-import { WatchlistMatcher } from "./watchlist";
 import { EventEmitter } from "./events";
-import { respond } from "./responder";
+import { respondToSkill } from "./responder";
 import { SessionStore } from "./session";
 import { startDashboard, type TranscriptPost } from "./dashboard";
+import {
+  SkillRegistry,
+  routeTranscript,
+  DEFAULT_SKILLS,
+  type RouterContext,
+  type RouterResult,
+  type SkillExecution,
+} from "./skills";
 
 // ── State ──────────────────────────────────────────────────────────
 
 let running = true;
 let activeSession: SessionStore | null = null;
+
+/** Rolling log of recent skill executions — fed back to router + analyzer. */
+const recentSkillExecutions: SkillExecution[] = [];
+const MAX_SKILL_HISTORY = 20;
+
+function recordSkillExecution(exec: SkillExecution) {
+  recentSkillExecutions.push(exec);
+  if (recentSkillExecutions.length > MAX_SKILL_HISTORY) {
+    recentSkillExecutions.shift();
+  }
+}
 
 // ── Signal handling ────────────────────────────────────────────────
 
@@ -59,18 +77,12 @@ async function initSystems(
   config: ListenConfig,
   onTranscript?: (post: TranscriptPost) => void | Promise<void>
 ) {
-  // Watchlist
-  const watchlist = new WatchlistMatcher();
-  if (config.watchlistPath) {
-    const count = await watchlist.load(config.watchlistPath);
-    if (count > 0) {
-      const summary = watchlist.summary();
-      const cats = Object.entries(summary)
-        .map(([k, v]) => `${k}(${v})`)
-        .join(" ");
-      console.log(`  📋 watchlist: ${count} patterns loaded [${cats}]`);
-    }
+  // Skill registry — register all built-in skills
+  const registry = new SkillRegistry();
+  for (const skill of DEFAULT_SKILLS) {
+    await registry.register(skill);
   }
+  console.log(`  🧩 skills: ${registry.summary()}`);
 
   // Event emitter (JSONL log for external agents)
   const events = new EventEmitter(config.eventLogPath, config.verbose);
@@ -85,50 +97,207 @@ async function initSystems(
   // Web dashboard (SSE live updates + optional transcript POST handler)
   startDashboard(session, onTranscript);
 
-  return { watchlist, events, session };
+  return { registry, events, session };
 }
 
 /**
- * Run watchlist check on a chunk. Fires IMMEDIATELY (no gating).
- * This is the fast path — pure string matching, no LLM calls.
+ * Process a transcript through the skill router.
+ * This is the unified pipeline that replaces the old gate + watchlist.
+ *
+ * Context flow:
+ *   1. Build RouterContext with transcript + buffer + recent skill history
+ *   2. Route (single LLM call) — router sees recent skills to avoid re-triggers
+ *   3. Enrich context with router reasoning + all matches (so handlers see the full picture)
+ *   4. Execute matched skills — each handler sees why it was triggered + siblings
+ *   5. Record executions into skill history (fed back to future router calls)
+ *   6. If interest is high → build situation summary → analyzer sees everything
  */
-async function checkWatchlist(
+async function processTranscript(
   text: string,
-  context: string,
+  buffer: TranscriptBuffer,
   entryId: string,
-  watchlist: WatchlistMatcher,
+  registry: SkillRegistry,
   events: EventEmitter,
   session: SessionStore,
   config: ListenConfig,
   cycleLabel: string
 ): Promise<void> {
-  if (!text) return;
+  if (!text || buffer.wordCount < 3) return;
 
-  const matches = watchlist.check(text);
+  // 1. Build context — includes recent skill history so router avoids re-triggers
+  const ctx: RouterContext = {
+    transcript: text,
+    buffer: buffer.recentText(2),
+    timestamp: new Date(),
+    recentSkills: recentSkillExecutions.slice(-10), // last 10 executions
+  };
 
-  for (const match of matches) {
+  // 2. Route — single LLM call classifies across all skills
+  const t0 = performance.now();
+  const result: RouterResult = await routeTranscript(ctx, registry, config);
+  const routerMs = Math.round(performance.now() - t0);
+
+  // 3. Enrich context so skill handlers see the full picture
+  ctx.routerReason = result.reason;
+  ctx.allMatches = result.matches;
+
+  const matchedNames = result.matches.map((m) => `${m.skill}.${m.action}`);
+  const escalated = result.interest >= config.threshold;
+
+  // Log router result
+  await events.routerResult(
+    result.interest,
+    result.reason,
+    matchedNames,
+    buffer.wordCount
+  );
+  session.addRouterResult(
+    result.interest,
+    result.reason,
+    matchedNames,
+    routerMs,
+    entryId
+  );
+
+  if (config.verbose) {
+    const icon = result.matches.length > 0
+      ? "⚡"
+      : escalated
+        ? "🟢"
+        : "⚪";
+    const skillList = matchedNames.length > 0
+      ? ` → [${matchedNames.join(", ")}]`
+      : "";
+    console.log(
+      `  ${cycleLabel} 🧭 ${icon} interest=${result.interest}/10 (${routerMs}ms)${skillList} — ${result.reason}`
+    );
+  }
+
+  // 4. Execute matched skills — each handler sees enriched context
+  const executionResults: Array<{
+    skill: string;
+    action: string;
+    success: boolean;
+    voice?: string;
+    confidence: number;
+  }> = [];
+
+  for (const match of result.matches) {
+    if (!running) break;
+
     if (config.verbose) {
       console.log(
-        `  ${cycleLabel} 🫀 WATCHLIST HIT [${match.pattern.severity}] ${match.pattern.category}/${match.pattern.id} → "${match.trigger}"`
+        `  ${cycleLabel} ⚡ ${match.skill}.${match.action}(${JSON.stringify(match.params)}) [${(match.confidence * 100).toFixed(0)}%]`
       );
     }
 
-    // 1. Emit event (for external agents)
-    await events.watchlistMatch(
-      match.pattern.id,
-      match.pattern.category,
-      match.pattern.severity,
-      match.trigger,
-      match.matchedText,
-      context
+    const skillResult = await registry.execute(match, ctx);
+
+    // 5. Record into skill history for future router calls
+    const exec: SkillExecution = {
+      skill: match.skill,
+      action: match.action,
+      success: skillResult.success,
+      voice: skillResult.voice,
+      timestamp: new Date(),
+    };
+    recordSkillExecution(exec);
+
+    executionResults.push({
+      skill: match.skill,
+      action: match.action,
+      success: skillResult.success,
+      voice: skillResult.voice,
+      confidence: match.confidence,
+    });
+
+    // Log skill execution
+    await events.skillExecuted(
+      match.skill,
+      match.action,
+      skillResult.success,
+      match.confidence
+    );
+    session.addSkillResult(
+      match.skill,
+      match.action,
+      skillResult.success,
+      skillResult.voice,
+      entryId
     );
 
-    // 2. Record in session (for dashboard)
-    session.addWatchlistMatch(match, entryId);
+    // Respond (sound, voice, notification)
+    if (skillResult.success) {
+      await respondToSkill(match.skill, skillResult);
+    }
 
-    // 3. Execute response (sound → voice → notification)
-    await respond(match);
+    if (config.verbose && skillResult.success) {
+      console.log(
+        `  ${cycleLabel}   ✓ ${match.skill}: ${skillResult.voice || "(no voice)"}`
+      );
+    }
   }
+
+  // 6. Escalate to big model analysis if interest is high
+  //    Analyzer gets FULL situation context: transcript + skill actions + results
+  if (escalated && running) {
+    if (config.verbose) {
+      console.log(
+        `  ${cycleLabel} 🚀 analyzing with ${config.analysisModel}...`
+      );
+    }
+
+    const situationContext = buildSituationContext(
+      buffer.fullContextTimestamped(),
+      result,
+      executionResults
+    );
+    const analysisResult = await analyze(situationContext, result.reason, config);
+    await events.analysisComplete(result.reason, analysisResult.insights);
+    session.addAnalysis(analysisResult, entryId);
+    await notify(analysisResult);
+  }
+}
+
+/**
+ * Build a rich situation summary for the analyzer.
+ * The big model sees not just the transcript, but what the system detected
+ * and what actions were taken — so it can provide genuinely useful analysis.
+ */
+function buildSituationContext(
+  timestampedTranscript: string,
+  routerResult: RouterResult,
+  executions: Array<{
+    skill: string;
+    action: string;
+    success: boolean;
+    voice?: string;
+    confidence: number;
+  }>
+): string {
+  const sections: string[] = [];
+
+  // Transcript
+  sections.push(`CONVERSATION TRANSCRIPT:\n${timestampedTranscript}`);
+
+  // What the router detected
+  sections.push(
+    `ROUTER ASSESSMENT:\n` +
+      `  Interest: ${routerResult.interest}/10\n` +
+      `  Reason: ${routerResult.reason}`
+  );
+
+  // What skills fired and what they did
+  if (executions.length > 0) {
+    const lines = executions.map((e) => {
+      const status = e.success ? "succeeded" : "FAILED";
+      const response = e.voice ? ` → responded: "${e.voice}"` : "";
+      return `  ${e.skill}.${e.action} [${(e.confidence * 100).toFixed(0)}% confidence] — ${status}${response}`;
+    });
+    sections.push(`ACTIONS TAKEN:\n${lines.join("\n")}`);
+  }
+
+  return sections.join("\n\n");
 }
 
 // ── Banner ─────────────────────────────────────────────────────────
@@ -144,17 +313,16 @@ function printBanner(config: ListenConfig): void {
 
   console.log(`
   ┌─────────────────────────────────────────────┐
-  │         🎧 listen — observability           │
+  │       🎧 listen — skill-based pipeline      │
   ├─────────────────────────────────────────────┤
   │  mode          ${config.mode.padEnd(29)}│
   │  audio device  ${audioLine.slice(0, 29).padEnd(29)}│
   │  transcriber   ${transcriber.slice(0, 29).padEnd(29)}│
-  │  gate model    ${config.gateModel.padEnd(29)}│
+  │  router model  ${config.gateModel.padEnd(29)}│
   │  analysis      ${config.analysisModel.padEnd(29)}│
   │  threshold     ${(config.threshold + "/10").padEnd(29)}│
-  │  gate          ${(config.localGateEndpoint ? "local → " + config.gateModel : "remote → " + config.gateModel).slice(0, 29).padEnd(29)}│
+  │  router        ${(config.localGateEndpoint ? "local → " + config.gateModel : "remote → " + config.gateModel).slice(0, 29).padEnd(29)}│
   │  buffer        ${(config.bufferMinutes + " min").padEnd(29)}│
-  │  watchlist     ${(config.watchlistPath || "disabled").padEnd(29)}│
   │  event log     ${config.eventLogPath.padEnd(29)}│
   ├─────────────────────────────────────────────┤
   │  Ctrl+C to stop                             │
@@ -167,7 +335,7 @@ function printBanner(config: ListenConfig): void {
 async function runLiveMode(config: ListenConfig): Promise<void> {
   await initRecorder(config);
   const buffer = new TranscriptBuffer(config.bufferMinutes);
-  const { watchlist, events, session } = await initSystems(config);
+  const { registry, events, session } = await initSystems(config);
 
   let cycle = 0;
 
@@ -208,75 +376,17 @@ async function runLiveMode(config: ListenConfig): Promise<void> {
         console.log(`  ${cycleLabel} 📝 "${truncate(chunk.text, 80)}"`);
       }
 
-      // 3. WATCHLIST — instant string match, no LLM
-      await checkWatchlist(
+      // 3. Route through skill system
+      await processTranscript(
         chunk.text,
-        buffer.recentText(1),
+        buffer,
         entry.id,
-        watchlist,
+        registry,
         events,
         session,
         config,
         cycleLabel
       );
-
-      if (!running) break;
-
-      // 4. GATE — run against rolling buffer context
-      const shouldGate =
-        config.gateEveryNChunks <= 0 ||
-        buffer.chunksSinceLastGate >= config.gateEveryNChunks;
-
-      if (shouldGate) {
-        const recentContext = buffer.recentText(1);
-        if (config.verbose) {
-          process.stdout.write(
-            `  ${cycleLabel} 🚦 gate (${buffer.wordCount}w)...`
-          );
-        }
-
-        const t0 = performance.now();
-        const gateResult = await runGate(recentContext, config);
-        const gateMs = Math.round(performance.now() - t0);
-        buffer.resetGateCounter();
-
-        const escalated = gateResult.score >= config.threshold;
-
-        await events.gateCheck(
-          gateResult.score,
-          gateResult.reason,
-          buffer.wordCount,
-          escalated
-        );
-        session.addGate(gateResult, gateMs, escalated, entry.id);
-
-        if (config.verbose) {
-          const icon = escalated ? "🟢" : "⚪";
-          console.log(
-            ` ${icon} ${gateResult.score}/10 (${gateMs}ms) — ${gateResult.reason}`
-          );
-        }
-
-        // 5. Escalate → full analysis
-        if (escalated) {
-          if (config.verbose) {
-            console.log(
-              `  ${cycleLabel} 🚀 analyzing with ${config.analysisModel}...`
-            );
-          }
-
-          const fullContext = buffer.fullContextTimestamped();
-          const result = await analyze(
-            fullContext,
-            gateResult.reason,
-            config
-          );
-
-          await events.analysisComplete(gateResult.reason, result.insights);
-          session.addAnalysis(result, entry.id);
-          await notify(result);
-        }
-      }
     } else {
       if (config.verbose) console.log(` (silence)`);
       session.addChunk(cycle, "", config.chunkSeconds);
@@ -290,7 +400,7 @@ async function runLiveMode(config: ListenConfig): Promise<void> {
 // ── Moonshine mode ─────────────────────────────────────────────────
 // Receives transcript POSTs from the Moonshine Swift menu bar app.
 // No ffmpeg, no whisper — the Swift app handles audio capture + transcription.
-// This process runs the dashboard, watchlist, gate, and analysis pipeline.
+// This process runs the dashboard, skill router, and analysis pipeline.
 
 async function runMoonshineMode(config: ListenConfig): Promise<void> {
   const buffer = new TranscriptBuffer(config.bufferMinutes);
@@ -323,59 +433,17 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
       );
     }
 
-    // Watchlist — instant string match
-    await checkWatchlist(
+    // Route through skill system
+    await processTranscript(
       post.text,
-      buffer.recentText(1),
+      buffer,
       entry.id,
-      watchlist,
+      registry,
       events,
       session,
       config,
       cycleLabel
     );
-
-    if (!running) return;
-
-    // Gate — run on buffer context
-    if (buffer.wordCount >= 5) {
-      const t0 = performance.now();
-      const gateResult = await runGate(buffer.recentText(2), config);
-      const gateMs = Math.round(performance.now() - t0);
-      buffer.resetGateCounter();
-
-      const escalated = gateResult.score >= config.threshold;
-      await events.gateCheck(
-        gateResult.score,
-        gateResult.reason,
-        buffer.wordCount,
-        escalated
-      );
-      session.addGate(gateResult, gateMs, escalated, entry.id);
-
-      if (config.verbose) {
-        const icon = escalated ? "🟢" : "⚪";
-        console.log(
-          `  ${cycleLabel} 🚦 ${icon} ${gateResult.score}/10 (${gateMs}ms) — ${gateResult.reason}`
-        );
-      }
-
-      if (escalated) {
-        if (config.verbose) {
-          console.log(
-            `  ${cycleLabel} 🚀 analyzing with ${config.analysisModel}...`
-          );
-        }
-        const result = await analyze(
-          buffer.fullContextTimestamped(),
-          gateResult.reason,
-          config
-        );
-        await events.analysisComplete(gateResult.reason, result.insights);
-        session.addAnalysis(result, entry.id);
-        await notify(result);
-      }
-    }
   };
 
   // Serialized wrapper: queues transcript processing to avoid concurrent mutations
@@ -386,7 +454,7 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
   };
 
   // Init systems with the serialized transcript callback
-  const { watchlist, events, session } = await initSystems(config, serialOnTranscript);
+  const { registry, events, session } = await initSystems(config, serialOnTranscript);
 
   // Mark ready — safe to process transcripts now that all systems are initialized
   ready = true;
@@ -396,7 +464,6 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
   console.log("  🖥  Open the Moonshine menu bar app to start transcribing.\n");
 
   // Keep the process alive until SIGINT sets running=false
-  // (The top-level SIGINT handler already saves the session)
   await new Promise<void>((resolve) => {
     const check = setInterval(() => {
       if (!running) {
@@ -414,12 +481,12 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
 
 async function runPipeMode(config: ListenConfig): Promise<void> {
   const buffer = new TranscriptBuffer(config.bufferMinutes);
-  const { watchlist, events, session } = await initSystems(config);
+  const { registry, events, session } = await initSystems(config);
 
   console.log(
     "  📋 pipe mode — paste transcript, press Enter, Ctrl+D to finish."
   );
-  console.log("  Watchlist + gate check on every input.\n");
+  console.log("  Skill router runs on every input.\n");
 
   const decoder = new TextDecoder();
   let cycle = 0;
@@ -445,85 +512,32 @@ async function runPipeMode(config: ListenConfig): Promise<void> {
       );
     }
 
-    // Watchlist — instant string match
-    await checkWatchlist(
+    // Route through skill system
+    await processTranscript(
       text,
-      buffer.recentText(1),
+      buffer,
       entry.id,
-      watchlist,
+      registry,
       events,
       session,
       config,
       "     "
     );
-
-    // Gate — run on buffer context after every input
-    if (buffer.wordCount >= 5) {
-      const t0 = performance.now();
-      const gateResult = await runGate(buffer.recentText(2), config);
-      const gateMs = Math.round(performance.now() - t0);
-      buffer.resetGateCounter();
-
-      const escalated = gateResult.score >= config.threshold;
-      await events.gateCheck(
-        gateResult.score,
-        gateResult.reason,
-        buffer.wordCount,
-        escalated
-      );
-      session.addGate(gateResult, gateMs, escalated, entry.id);
-
-      console.log(
-        `  ${escalated ? "🟢" : "⚪"} ${gateResult.score}/10 (${gateMs}ms) — ${gateResult.reason}`
-      );
-
-      if (escalated) {
-        console.log(`  🚀 analyzing...`);
-        const result = await analyze(
-          buffer.fullContextTimestamped(),
-          gateResult.reason,
-          config
-        );
-        await events.analysisComplete(gateResult.reason, result.insights);
-        session.addAnalysis(result, entry.id);
-        await notify(result);
-      }
-    }
   }
 
-  // Final gate check on remaining text
+  // Final check on remaining buffer
   if (buffer.wordCount > 20) {
-    console.log(`\n  🚦 final gate check on remaining buffer...`);
-    const gateResult = await runGate(buffer.fullContext(), config);
-    const escalated = gateResult.score >= config.threshold;
-
-    await events.gateCheck(
-      gateResult.score,
-      gateResult.reason,
-      buffer.wordCount,
-      escalated
+    console.log(`\n  🧭 final router check on remaining buffer...`);
+    await processTranscript(
+      buffer.fullContext(),
+      buffer,
+      session.getTimeline().at(-1)?.id ?? "final",
+      registry,
+      events,
+      session,
+      config,
+      "     "
     );
-
-    const lastEntry = session.getTimeline().at(-1);
-    if (lastEntry) session.addGate(gateResult, 0, escalated, lastEntry.id);
-
-    console.log(
-      `  ${escalated ? "🟢" : "⚪"} score: ${gateResult.score}/10 — ${gateResult.reason}`
-    );
-
-    if (escalated) {
-      console.log(`  🚀 analyzing...`);
-      const result = await analyze(
-        buffer.fullContextTimestamped(),
-        gateResult.reason,
-        config
-      );
-      await events.analysisComplete(gateResult.reason, result.insights);
-      if (lastEntry) session.addAnalysis(result, lastEntry.id);
-      await notify(result);
-    } else {
-      console.log("  ⚪ nothing actionable detected.");
-    }
   }
 
   await session.save();

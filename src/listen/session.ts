@@ -31,6 +31,8 @@ export type TimelineEvent =
   | { type: "gate"; score: number; reason: string; latencyMs: number }
   | { type: "gate.escalation"; score: number; reason: string; latencyMs: number }
   | { type: "watchlist"; patternId: string; category: string; severity: string; trigger: string }
+  | { type: "router"; interest: number; reason: string; skills: string[]; latencyMs: number }
+  | { type: "skill"; skill: string; action: string; success: boolean; voice?: string }
   | { type: "analysis"; insights: string; triggerReason: string }
   | { type: "silence" }
   | { type: "correction"; from: string; to: string; at: string };
@@ -128,6 +130,58 @@ export class SessionStore {
 
     entry.events.push(evt);
     this.notify("watchlist", { entryId: entry.id, ...evt });
+    this.debounceSave();
+  }
+
+  /** Add a router result to the latest entry. */
+  addRouterResult(
+    interest: number,
+    reason: string,
+    skills: string[],
+    latencyMs: number,
+    entryId?: string
+  ) {
+    const entry = entryId
+      ? this.session.timeline.find((e) => e.id === entryId)
+      : this.lastNonSilent();
+    if (!entry) return;
+
+    const evt: TimelineEvent = {
+      type: "router",
+      interest,
+      reason,
+      skills,
+      latencyMs,
+    };
+
+    entry.events.push(evt);
+    this.notify("router", { entryId: entry.id, ...evt });
+    this.debounceSave();
+  }
+
+  /** Add a skill execution result to the latest entry. */
+  addSkillResult(
+    skill: string,
+    action: string,
+    success: boolean,
+    voice?: string,
+    entryId?: string
+  ) {
+    const entry = entryId
+      ? this.session.timeline.find((e) => e.id === entryId)
+      : this.lastNonSilent();
+    if (!entry) return;
+
+    const evt: TimelineEvent = {
+      type: "skill",
+      skill,
+      action,
+      success,
+      voice,
+    };
+
+    entry.events.push(evt);
+    this.notify("skill", { entryId: entry.id, ...evt });
     this.debounceSave();
   }
 
