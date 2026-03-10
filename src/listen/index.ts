@@ -28,7 +28,7 @@ import { notify } from "./notifier";
 import { EventEmitter } from "./events";
 import { respondToSkill } from "./responder";
 import { SessionStore } from "./session";
-import { IntentVectorStore } from "./intent-vector";
+import { IntentVectorStore, ActivationGate, type GateResult } from "./intent-vector";
 import { startDashboard, type TranscriptPost } from "./dashboard";
 import {
   SkillRegistry,
@@ -101,11 +101,12 @@ async function initSystems(
 
   // Intent vector engine (multi-dimensional activation tracking)
   const intentVector = new IntentVectorStore();
+  const activationGate = new ActivationGate();
 
   // Web dashboard (SSE live updates + optional transcript POST handler)
   startDashboard(session, onTranscript);
 
-  return { registry, events, session, intentVector };
+  return { registry, events, session, intentVector, activationGate };
 }
 
 /**
@@ -128,6 +129,7 @@ async function processTranscript(
   events: EventEmitter,
   session: SessionStore,
   intentVector: IntentVectorStore,
+  activationGate: ActivationGate,
   config: ListenConfig,
   cycleLabel: string
 ): Promise<void> {
@@ -188,7 +190,34 @@ async function processTranscript(
     confidence: e.confidence,
   }));
   const vectorSnapshot = intentVector.update(vectorInputs);
-  session.emitIntentVector(vectorSnapshot, intentVector.history());
+
+  // 5c. Activation gate — post-classification wellbeing bias (hysteresis)
+  const classifierMatchedWellbeing = result.matches.some(m => m.skill === "wellbeing");
+  const classifierWellbeingConf = result.experts.find(e => e.skill === "wellbeing")?.confidence ?? 0;
+  const gateResult = activationGate.evaluate(
+    classifierMatchedWellbeing,
+    classifierWellbeingConf,
+    vectorSnapshot.dimensions.wellbeing,
+  );
+
+  // If gate promotes, inject a synthetic wellbeing match
+  if (gateResult.promoted && gateResult.promotedConfidence) {
+    result.matches.push({
+      skill: "wellbeing",
+      action: "check_in",
+      params: {},
+      confidence: gateResult.promotedConfidence,
+    });
+    result.interest = Math.max(result.interest, 7); // Bump interest for promoted wellbeing
+    result.reason += ` [gate:promoted@${gateResult.promotedConfidence.toFixed(2)}]`;
+    if (config.verbose) {
+      console.log(`  [${cycleLabel}] 🛡️ gate promoted wellbeing (state=${gateResult.state}, level=${gateResult.wellbeingLevel.toFixed(2)}, conf=${gateResult.promotedConfidence.toFixed(2)})`);
+    }
+  } else if (gateResult.state !== "idle" && config.verbose) {
+    console.log(`  [${cycleLabel}] 🛡️ gate: ${gateResult.state} (level=${gateResult.wellbeingLevel.toFixed(2)}, threshold=${gateResult.effectiveThreshold})`);
+  }
+
+  session.emitIntentVector(vectorSnapshot, intentVector.history(), gateResult);
 
   // 6. Record the full decision with per-expert breakdown
   const decision = session.addRouterDecision({
@@ -442,7 +471,7 @@ function printBanner(config: ListenConfig): void {
 async function runLiveMode(config: ListenConfig): Promise<void> {
   await initRecorder(config);
   const buffer = new TranscriptBuffer(config.bufferMinutes);
-  const { registry, events, session, intentVector } = await initSystems(config);
+  const { registry, events, session, intentVector, activationGate } = await initSystems(config);
 
   let cycle = 0;
 
@@ -492,6 +521,7 @@ async function runLiveMode(config: ListenConfig): Promise<void> {
         events,
         session,
         intentVector,
+        activationGate,
         config,
         cycleLabel
       );
@@ -550,6 +580,7 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
       events,
       session,
       intentVector,
+      activationGate,
       config,
       cycleLabel
     );
@@ -563,7 +594,7 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
   };
 
   // Init systems with the serialized transcript callback
-  const { registry, events, session, intentVector } = await initSystems(config, serialOnTranscript);
+  const { registry, events, session, intentVector, activationGate } = await initSystems(config, serialOnTranscript);
 
   // Mark ready — safe to process transcripts now that all systems are initialized
   ready = true;
@@ -590,7 +621,7 @@ async function runMoonshineMode(config: ListenConfig): Promise<void> {
 
 async function runPipeMode(config: ListenConfig): Promise<void> {
   const buffer = new TranscriptBuffer(config.bufferMinutes);
-  const { registry, events, session, intentVector } = await initSystems(config);
+  const { registry, events, session, intentVector, activationGate } = await initSystems(config);
 
   console.log(
     "  📋 pipe mode — paste transcript, press Enter, Ctrl+D to finish."
@@ -630,6 +661,7 @@ async function runPipeMode(config: ListenConfig): Promise<void> {
       events,
       session,
       intentVector,
+      activationGate,
       config,
       "     "
     );
@@ -646,6 +678,7 @@ async function runPipeMode(config: ListenConfig): Promise<void> {
       events,
       session,
       intentVector,
+      activationGate,
       config,
       "     "
     );

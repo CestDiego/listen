@@ -10,7 +10,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { dirname } from "path";
 import type { GateResult, AnalysisResult } from "./config";
 import type { WatchlistMatch } from "./watchlist";
-import type { IntentVectorSnapshot } from "./intent-vector";
+import type { IntentVectorSnapshot, GateResult as ActivationGateResult } from "./intent-vector";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -353,11 +353,11 @@ export class SessionStore {
     this.debounceSave();
   }
 
-  /** Store and broadcast an intent vector snapshot. */
-  emitIntentVector(snapshot: IntentVectorSnapshot, history: IntentVectorSnapshot[]): void {
+  /** Store and broadcast an intent vector snapshot with optional gate result. */
+  emitIntentVector(snapshot: IntentVectorSnapshot, history: IntentVectorSnapshot[], gate?: ActivationGateResult): void {
     this.intentVector = snapshot;
     this.intentVectorHistory = history;
-    this.notify("intentVector", { snapshot, history });
+    this.notify("intentVector", { snapshot, history, gate: gate ?? null });
   }
 
   /** Correct a transcription. Returns true if found. */

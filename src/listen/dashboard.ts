@@ -503,6 +503,31 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     text-align: center; color: var(--muted); padding: 60px 20px;
   }
   .intent-empty h2 { font-size: 16px; margin-bottom: 8px; }
+
+  /* ── Gate Status ─────────────────────────────────────────── */
+  .gate-status {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: 6px; margin-bottom: 16px;
+    border: 1px solid var(--border); background: var(--surface);
+    font-size: 12px;
+  }
+  .gate-indicator {
+    width: 10px; height: 10px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .gate-indicator.idle { background: var(--muted); }
+  .gate-indicator.vigilant { background: var(--yellow); animation: pulse 1.5s infinite; }
+  .gate-indicator.active { background: var(--red); animation: pulse 0.8s infinite; }
+  .gate-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .gate-label.idle { color: var(--muted); }
+  .gate-label.vigilant { color: var(--yellow); }
+  .gate-label.active { color: var(--red); }
+  .gate-detail { color: var(--muted); font-size: 11px; }
+  .gate-promoted {
+    padding: 2px 8px; border-radius: 10px; font-size: 10px;
+    background: rgba(248, 81, 73, 0.15); color: var(--red);
+    font-weight: 600;
+  }
 </style>
 </head>
 <body>
@@ -564,6 +589,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <!-- Intent Vector Panel -->
 <div class="tab-panel" id="panel-intent">
   <div id="intent-panel">
+    <div class="gate-status" id="gate-status">
+      <div class="gate-indicator idle" id="gate-indicator"></div>
+      <span class="gate-label idle" id="gate-label">idle</span>
+      <span class="gate-detail" id="gate-detail">Activation gate inactive</span>
+    </div>
     <div class="intent-layout">
       <div class="radar-container">
         <canvas id="radar-chart" width="260" height="260"></canvas>
@@ -1108,8 +1138,51 @@ function renderSparklines(history) {
   });
 }
 
+// -- Gate status -------------------------------------------------------
+function updateGateStatus(gate) {
+  const indicator = document.getElementById('gate-indicator');
+  const label = document.getElementById('gate-label');
+  const detail = document.getElementById('gate-detail');
+  const statusEl = document.getElementById('gate-status');
+
+  if (!gate) {
+    indicator.className = 'gate-indicator idle';
+    label.className = 'gate-label idle';
+    label.textContent = 'idle';
+    detail.textContent = 'Activation gate inactive';
+    // Remove any promoted badge
+    const old = statusEl.querySelector('.gate-promoted');
+    if (old) old.remove();
+    return;
+  }
+
+  // Update indicator + label
+  indicator.className = 'gate-indicator ' + gate.state;
+  label.className = 'gate-label ' + gate.state;
+  label.textContent = gate.state;
+
+  // Build detail text
+  let detailText = 'wellbeing: ' + gate.wellbeingLevel.toFixed(2) +
+    ' | threshold: ' + gate.effectiveThreshold.toFixed(2);
+  if (gate.timeSinceLastTrigger !== null) {
+    const ago = Math.round(gate.timeSinceLastTrigger / 1000);
+    detailText += ' | last trigger: ' + ago + 's ago';
+  }
+  detail.textContent = detailText;
+
+  // Promoted badge
+  const oldBadge = statusEl.querySelector('.gate-promoted');
+  if (oldBadge) oldBadge.remove();
+  if (gate.promoted) {
+    const badge = document.createElement('span');
+    badge.className = 'gate-promoted';
+    badge.textContent = 'PROMOTED @ ' + (gate.promotedConfidence || 0).toFixed(2);
+    statusEl.appendChild(badge);
+  }
+}
+
 // -- Update intent display ----------------------------------------------
-function updateIntent(snapshot, history) {
+function updateIntent(snapshot, history, gate) {
   const emptyEl = document.getElementById('intent-empty');
   if (snapshot) {
     if (emptyEl) emptyEl.style.display = 'none';
@@ -1118,12 +1191,14 @@ function updateIntent(snapshot, history) {
     drawRadar(snapshot.dimensions);
     renderReadouts(snapshot.dimensions, snapshot.trends);
     renderSparklines(intentHistory);
+    updateGateStatus(gate || null);
   }
 }
 
 // Draw initial empty radar
 drawRadar(null);
 renderReadouts(null, null);
+updateGateStatus(null);
 
 // ── SSE Connection ─────────────────────────────────────────────
 const evtSource = new EventSource('/events');
@@ -1157,7 +1232,7 @@ evtSource.addEventListener('init', (e) => {
 
   // Load intent vector state
   if (session.intentVector) {
-    updateIntent(session.intentVector, session.intentVectorHistory || []);
+    updateIntent(session.intentVector, session.intentVectorHistory || [], null);
   }
 });
 
@@ -1205,7 +1280,7 @@ evtSource.addEventListener('correction', (e) => {
 
 evtSource.addEventListener('intentVector', (e) => {
   const data = JSON.parse(e.data);
-  updateIntent(data.snapshot, data.history);
+  updateIntent(data.snapshot, data.history, data.gate);
 });
 
 evtSource.addEventListener('stats', (e) => {

@@ -317,6 +317,152 @@ export class IntentVectorStore {
 }
 
 // ---------------------------------------------------------------------------
+// Activation Gate — post-classification routing bias
+// ---------------------------------------------------------------------------
+
+/** Gate state for a skill activation. */
+export type GateState = "idle" | "vigilant" | "active";
+
+/** Result of the activation gate check. */
+export interface GateResult {
+  /** Current gate state. */
+  state: GateState;
+  /** The decayed activation level for wellbeing [0, 1]. */
+  wellbeingLevel: number;
+  /** Effective threshold being used (lower when vigilant). */
+  effectiveThreshold: number;
+  /** Whether the gate promoted a wellbeing match this cycle. */
+  promoted: boolean;
+  /** If promoted, the synthetic confidence assigned. */
+  promotedConfidence?: number;
+  /** Time since last genuine wellbeing trigger (ms), or null if never. */
+  timeSinceLastTrigger: number | null;
+}
+
+/** Configuration for the activation gate. */
+export interface GateConfig {
+  /** Classifier confidence to enter active state. Default: 0.55 */
+  activateThreshold: number;
+  /** Intent vector level to drop back to idle. Default: 0.15 */
+  deactivateThreshold: number;
+  /** Confidence assigned to promoted (synthetic) matches. Default: 0.40 */
+  promotionConfidence: number;
+  /** Maximum gate duration in ms (hard cap). Default: 600_000 (10 min) */
+  maxGateDurationMs: number;
+  /** Minimum classifier confidence to be considered a "near miss". Default: 0.0
+   *  (promote any time we're vigilant, regardless of classifier score) */
+  nearMissFloor: number;
+}
+
+export const DEFAULT_GATE_CONFIG: GateConfig = {
+  activateThreshold: 0.55,
+  deactivateThreshold: 0.15,
+  promotionConfidence: 0.40,
+  maxGateDurationMs: 600_000,
+  nearMissFloor: 0.0,
+};
+
+export class ActivationGate {
+  private state: GateState = "idle";
+  private lastGenuineTriggerMs: number | null = null;
+  private config: GateConfig;
+
+  constructor(config?: Partial<GateConfig>) {
+    this.config = { ...DEFAULT_GATE_CONFIG, ...config };
+  }
+
+  /**
+   * Evaluate the gate after classification.
+   *
+   * @param classifierMatchedWellbeing  Did the classifier return a wellbeing match?
+   * @param classifierConfidence        Confidence of the wellbeing match (0 if no match)
+   * @param intentVectorWellbeingLevel  Current wellbeing dimension from IntentVectorStore
+   * @param now                         Current time (epoch ms), for testing
+   * @returns GateResult with state, whether to promote, etc.
+   */
+  evaluate(
+    classifierMatchedWellbeing: boolean,
+    classifierConfidence: number,
+    intentVectorWellbeingLevel: number,
+    now: number = Date.now(),
+  ): GateResult {
+    const timeSince = this.lastGenuineTriggerMs !== null
+      ? now - this.lastGenuineTriggerMs
+      : null;
+
+    // Hard cap: if we've been gated for too long, force idle
+    if (timeSince !== null && timeSince > this.config.maxGateDurationMs) {
+      this.state = "idle";
+    }
+
+    // State transitions
+    if (classifierMatchedWellbeing && classifierConfidence >= this.config.activateThreshold) {
+      // Genuine strong match → active, renew timer
+      this.state = "active";
+      this.lastGenuineTriggerMs = now;
+    } else if (classifierMatchedWellbeing) {
+      // Classifier matched but below activate threshold — still counts as genuine
+      // Keep current state or upgrade to vigilant
+      this.lastGenuineTriggerMs = now;
+      if (this.state === "idle") {
+        this.state = "vigilant";
+      }
+    } else if (this.state === "active") {
+      // Was active, classifier didn't match this cycle → transition to vigilant
+      this.state = "vigilant";
+    } else if (this.state === "vigilant") {
+      // Check if we should drop to idle
+      if (intentVectorWellbeingLevel < this.config.deactivateThreshold) {
+        this.state = "idle";
+      }
+      // else: stay vigilant (hysteresis — between thresholds)
+    }
+    // idle + no classifier match → stays idle
+
+    // Determine effective threshold
+    const effectiveThreshold = this.state === "idle"
+      ? this.config.activateThreshold
+      : this.config.deactivateThreshold;
+
+    // Promotion logic: only when vigilant AND classifier didn't match
+    let promoted = false;
+    let promotedConfidence: number | undefined;
+
+    if (
+      this.state === "vigilant" &&
+      !classifierMatchedWellbeing &&
+      intentVectorWellbeingLevel >= this.config.deactivateThreshold
+    ) {
+      promoted = true;
+      // Scale promotion confidence by the current activation level
+      // Higher activation = higher confidence in the promotion
+      promotedConfidence = this.config.promotionConfidence *
+        Math.min(1, intentVectorWellbeingLevel / this.config.activateThreshold);
+    }
+
+    return {
+      state: this.state,
+      wellbeingLevel: intentVectorWellbeingLevel,
+      effectiveThreshold,
+      promoted,
+      promotedConfidence,
+      timeSinceLastTrigger: timeSince,
+    };
+  }
+
+  /** Get current state without modifying it. */
+  getState(): GateState {
+    return this.state;
+  }
+
+  /** Reset gate to idle. */
+  reset(): void {
+    this.state = "idle";
+    this.lastGenuineTriggerMs = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
