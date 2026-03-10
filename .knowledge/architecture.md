@@ -198,6 +198,77 @@ Run `bun run scripts/inject-test.ts` to inject a scripted sequence that exercise
 all dimensions: music commands, wellbeing triggers, neutral text, and decay pauses.
 Requires `./start.sh` or manual pipeline + expert server startup.
 
+---
+
+## Activation Gate (Post-Classification Wellbeing Bias)
+
+### Overview
+A Schmitt-trigger-inspired state machine that sits after the classifier and biases
+routing toward wellbeing when recent context suggests emotional distress. Implements
+hysteresis (different thresholds for activation vs deactivation) and cost-asymmetric
+promotion (missing distress costs 10× more than a false check-in).
+
+### Research Basis
+- **Collins & Loftus (1975)** — spreading activation theory (decay + propagation)
+- **Dialogflow context lifespans** — turn-based sticky state with renewal on match
+- **Bayesian cost-sensitive thresholds** — FN/FP cost ratio drives threshold
+- **LEAD-Drift (2026)** — EMA + hysteresis for drift detection
+- **Woebot/Wysa** — safety-critical intent override patterns
+
+### State Machine
+```
+                 classifier matches wellbeing
+                 (confidence >= 0.55)
+    ┌──────────────────────────────────────┐
+    │                                      ▼
+  IDLE ──────────────────────────────── ACTIVE
+    ▲                                      │
+    │  vector < 0.15                       │ classifier misses next cycle
+    │  (deactivation threshold)            ▼
+    └──────────────────────────── VIGILANT
+                                    │
+                                    │ if !classifierMatch && vector >= 0.15:
+                                    │   → PROMOTE wellbeing @ 0.40 confidence
+                                    │
+                                    │ renewal: any genuine wellbeing match
+                                    │   → back to ACTIVE, reset timer
+```
+
+### Parameters
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Activate threshold | 0.55 | Standard confidence for fresh activation |
+| Deactivate threshold | 0.15 | Hysteresis — much lower to prevent flicker |
+| Promotion confidence | 0.40 | Synthetic match, lower than genuine (0.83) |
+| Max gate duration | 10 min | Hard cap via Lex dual-expiry pattern |
+| Cost ratio (FN/FP) | 10:1 | Missing distress >> false check-in |
+
+### Integration Test Results (2026-03-10)
+Gate scenario with 9 transcripts:
+- **4 gate promotions** — "whatever, it doesn't matter" (×2), "play some music",
+  "what time is it" all promoted while gate was vigilant
+- **2 correct catches** — "whatever, it doesn't matter" was missed by classifier
+  both times, caught by gate ✅
+- **1 debatable** — "play some music" got dual activation (music + promoted wellbeing).
+  May want to suppress promotion when another skill already matched clearly.
+- **2B model surprise** — "I'm just tired" and "I don't know anymore" both classified
+  as wellbeing at 83% by the 2B model directly, without needing the gate.
+  The gate provides coverage for the cases the classifier misses.
+
+### Tuning Notes
+- The gate is intentionally aggressive — biased toward recall for wellbeing
+- Consider suppressing promotion when a non-wellbeing skill already matched
+  at high confidence (>0.8) to avoid unnecessary dual-activation
+- The 15s decay pause wasn't enough to test the idle path because the 2B
+  model catches "I'm just tired" even in isolation. Need a more ambiguous
+  test phrase to verify the full idle→active→vigilant→idle cycle.
+
+### Files
+- `src/listen/intent-vector.ts` — `ActivationGate` class (appended to existing file)
+- `src/listen/index.ts` — gate evaluation after classify, match promotion
+- `src/listen/dashboard.ts` — gate status indicator (idle/vigilant/active + promoted badge)
+- `scripts/inject-test.ts` — `--scenario gate` for hysteresis testing
+
 ### Future Phases
 - **Phase 2**: Add `mood` (sentiment), `energy` (speech rate) dimensions via heuristics
 - **Phase 3**: Train tiny LoRA classifiers for important dimensions
