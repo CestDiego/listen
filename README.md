@@ -2,71 +2,100 @@
 
 Live audio observability for your conversations. Transcribes speech locally, watches for patterns you care about, and responds with gentle sounds and voice when it notices something.
 
+Everything runs on your Mac — no audio leaves your machine.
+
 ```
 mic → transcribe → watchlist → gate → analyze → respond
                                   ↓
                            dashboard :3838
 ```
 
+## Setup (macOS only)
+
+### 1. Install prerequisites
+
+```bash
+# Bun (JS/TS runtime)
+curl -fsSL https://bun.sh/install | bash
+
+# Xcode (needed to build the menu bar app)
+# Install from the App Store, then accept the license:
+sudo xcodebuild -license accept
+
+# Python + Moonshine model (local speech-to-text)
+pip install moonshine-voice
+python -m moonshine_voice.download --language en
+
+# LM Studio (local LLM for the gate check)
+# Download from https://lmstudio.ai
+# Open it, search for "glm-4-9b-0414", download, and start the server
+```
+
+### 2. Clone and build
+
+```bash
+git clone https://github.com/CestDiego/listen.git
+cd listen
+
+# Install JS dependencies
+bun install
+
+# Build the Swift menu bar app (~60s first time, downloads Moonshine framework)
+./start.sh --build
+```
+
+### 3. (Optional) Set up ElevenLabs for voice responses
+
+Without this, voice responses use macOS `say` (which still works fine).
+
+```bash
+cp .env.example .env
+# Edit .env with your ElevenLabs API key
+```
+
+### 4. Run
+
+```bash
+./start.sh
+```
+
+This launches both processes:
+- **Bun pipeline** — watchlist, gate, analysis, web dashboard
+- **Menu bar app** — captures audio, transcribes with Moonshine, posts to Bun
+
+You'll see a `listen` icon appear in your menu bar. Click it to see the mic picker, live transcripts, and status.
+
+Open **http://localhost:3838** for the web dashboard.
+
+### Stopping
+
+```bash
+./start.sh --stop
+```
+
+Or just `Ctrl+C` in the terminal where `start.sh` is running.
+
 ## What it does
 
 - **Transcribes** speech in real time using [Moonshine](https://github.com/moonshine-ai/moonshine-swift) (100% local, no cloud)
 - **Watches** for configurable patterns (e.g., negative self-talk, burnout signals)
 - **Gates** with a local LLM to avoid false escalations
-- **Analyzes** interesting content with a larger model
-- **Responds** with sounds, voice (ElevenLabs or macOS TTS), and notifications
-- **Streams** everything to a live web dashboard with inline correction
+- **Analyzes** interesting content with a larger model when the gate score is high enough
+- **Responds** with sounds, voice (ElevenLabs or macOS TTS), and macOS notifications
+- **Streams** everything to a live web dashboard with inline transcript correction
 - **Emits** structured JSONL events for downstream agents
 
 ## Architecture
 
-Two processes work together:
-
-| Process | Role |
-|---------|------|
-| **Bun server** (`--moonshine` mode) | Runs the pipeline: watchlist, gate, analysis, dashboard |
-| **Swift menu bar app** | Captures audio via Moonshine, transcribes locally, POSTs to Bun |
-
-The menu bar app shows a mic picker, live partial transcripts, and status indicators.
-
-## Prerequisites
-
-- macOS 13+
-- [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`)
-- [Xcode](https://developer.apple.com/xcode/) (for building the Swift menu bar app)
-- [LM Studio](https://lmstudio.ai/) running on `localhost:1234` with a model loaded (for the gate)
-- Moonshine model: `pip install moonshine-voice && python -m moonshine_voice.download --language en`
-
-## Quick start
-
-```bash
-# 1. Install dependencies
-bun install
-
-# 2. Build the menu bar app
-bun run listen:menubar:build
-bun run listen:menubar:copy
-
-# 3. (Optional) Set up ElevenLabs for voice responses
-cp .env.example .env
-# Edit .env with your API key
-
-# 4. Start the pipeline
-bun run listen:moonshine
-
-# 5. In another terminal, launch the menu bar app
-./bin/ListenMenuBar
 ```
-
-Open http://localhost:3838 to see the live dashboard.
-
-## Modes
-
-| Mode | Command | Description |
-|------|---------|-------------|
-| `--moonshine` | `bun run listen:moonshine` | Receives transcripts from the menu bar app (recommended) |
-| `--pipe` | `bun run listen:pipe` | Paste/pipe transcripts via stdin |
-| (default) | `bun run listen` | Legacy: records audio with ffmpeg + transcribes with mlx_whisper |
+┌─────────────────────────┐     POST /api/transcript     ┌──────────────────────────┐
+│  Swift Menu Bar App     │ ──────────────────────────▶  │  Bun listen process       │
+│  (Moonshine transcriber)│                               │  (gate/watchlist/analyze) │
+│  - Mic picker           │  ◀────────────────────────── │  - Dashboard :3838        │
+│  - Live partial text    │     SSE /events               │  - Session store          │
+│  - Status indicator     │                               │  - Event log (JSONL)      │
+└─────────────────────────┘                               └──────────────────────────┘
+```
 
 ## Watchlist
 
@@ -74,7 +103,8 @@ The `watchlist.default.json` file contains example patterns. Copy it to customiz
 
 ```bash
 cp watchlist.default.json watchlist.json
-bun run listen:moonshine --watchlist watchlist.json
+# Edit watchlist.json — add your own patterns
+./start.sh  # will use watchlist.default.json by default
 ```
 
 Patterns support string matching and regex, with configurable severity, cooldowns, and response actions (sound + voice message + notification).
@@ -89,7 +119,7 @@ tail -f /tmp/listen-events.jsonl | jq
 
 Event types: `gate.check`, `gate.escalation`, `watchlist.match`, `analysis.complete`
 
-## Options
+## CLI options
 
 ```
 bun run listen:help
@@ -105,22 +135,24 @@ Key flags:
 ## Project structure
 
 ```
+start.sh              — one-command launcher (builds, starts, stops)
+watchlist.default.json — example watchlist patterns
 src/listen/
-  index.ts          — CLI entry, 3 modes (live/pipe/moonshine)
-  config.ts         — types, CLI parser, defaults
-  dashboard.ts      — web UI + SSE + REST API (port 3838)
-  session.ts        — timeline store with corrections
-  gate.ts           — local LLM gate check
-  watchlist.ts      — pattern matcher with cooldowns
-  responder.ts      — sound + voice + notification responses
-  analyzer.ts       — full analysis via opencode
-  buffer.ts         — rolling transcript buffer
-  events.ts         — JSONL event emitter
-  recorder.ts       — ffmpeg audio capture (legacy mode)
-  transcriber.ts    — mlx_whisper transcription (legacy mode)
-  notifier.ts       — macOS notifications
+  index.ts            — CLI entry, 3 modes (live/pipe/moonshine)
+  config.ts           — types, CLI parser, defaults
+  dashboard.ts        — web UI + SSE + REST API (port 3838)
+  session.ts          — timeline store with corrections
+  gate.ts             — local LLM gate check
+  watchlist.ts        — pattern matcher with cooldowns
+  responder.ts        — sound + voice + notification responses
+  analyzer.ts         — full analysis via opencode
+  buffer.ts           — rolling transcript buffer
+  events.ts           — JSONL event emitter
+  recorder.ts         — ffmpeg audio capture (legacy mode)
+  transcriber.ts      — mlx_whisper transcription (legacy mode)
+  notifier.ts         — macOS notifications
   menubar/
-    Package.swift   — Swift package (moonshine-swift dependency)
+    Package.swift     — Swift package (moonshine-swift dependency)
     Sources/ListenMenuBar/
-      App.swift     — macOS menu bar app with mic picker
+      App.swift       — macOS menu bar app with mic picker
 ```
