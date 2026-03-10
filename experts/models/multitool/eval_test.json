@@ -1,0 +1,147 @@
+{
+  "adapter": "models/multitool/adapters.safetensors",
+  "split": "test",
+  "total": 31,
+  "exact_matches": 25,
+  "exact_match_accuracy": 0.8065,
+  "negative": {
+    "total": 11,
+    "correct": 10
+  },
+  "single_tool": {
+    "total": 18,
+    "correct": 15
+  },
+  "dual_tool": {
+    "total": 2,
+    "correct": 0
+  },
+  "per_tool": {
+    "music.dislike": {
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    "music.pause": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "music.play": {
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "music.previous": {
+      "tp": 2,
+      "fp": 0,
+      "fn": 1,
+      "precision": 1.0,
+      "recall": 0.6667,
+      "f1": 0.8
+    },
+    "music.skip": {
+      "tp": 4,
+      "fp": 1,
+      "fn": 1,
+      "precision": 0.8,
+      "recall": 0.8,
+      "f1": 0.8
+    },
+    "music.volume_down": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "music.volume_up": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "wellbeing.check_in": {
+      "tp": 4,
+      "fp": 1,
+      "fn": 2,
+      "precision": 0.8,
+      "recall": 0.6667,
+      "f1": 0.7273
+    }
+  },
+  "avg_latency_ms": 236.1,
+  "errors": [
+    {
+      "transcript": "skip this stupid song, I'm such an idiot for adding it",
+      "expected": [
+        "music.skip"
+      ],
+      "predicted": [
+        "music.skip",
+        "wellbeing.check_in"
+      ],
+      "raw": "<tool_call>\n<function=music.skip>\n</function>\n</tool_call>\n<tool_call>\n<function=wellbeing.check_in>\n</function>\n</tool_call>"
+    },
+    {
+      "transcript": "I don't like this track",
+      "expected": [
+        "music.skip"
+      ],
+      "predicted": [
+        "music.dislike"
+      ],
+      "raw": "<tool_call>\n<function=music.dislike>\n</function>\n</tool_call>"
+    },
+    {
+      "transcript": "change the song, this one reminds me of how much I've failed",
+      "expected": [
+        "music.skip",
+        "wellbeing.check_in"
+      ],
+      "predicted": [
+        "music.skip"
+      ],
+      "raw": "<tool_call>\n<function=music.skip>\n</function>\n</tool_call>"
+    },
+    {
+      "transcript": "turn it down, my head is killing me and I can't cope with anything",
+      "expected": [
+        "music.volume_down",
+        "wellbeing.check_in"
+      ],
+      "predicted": [
+        "music.volume_down"
+      ],
+      "raw": "<tool_call>\n<function=music.volume_down>\n</function>\n</tool_call>"
+    },
+    {
+      "transcript": "let me share my screen for a second",
+      "expected": [],
+      "predicted": [
+        "music.skip"
+      ],
+      "raw": "<tool_call>\n<function=music.skip>\n</function>\n</tool_call>"
+    },
+    {
+      "transcript": "I liked the previous one",
+      "expected": [
+        "music.previous"
+      ],
+      "predicted": [],
+      "raw": "No tools needed."
+    }
+  ]
+}

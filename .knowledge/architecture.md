@@ -1,104 +1,140 @@
 # Listen — Architecture
 
-## Skill Expert Models (MLX)
+## Multi-Tool Classifier (MLX)
 
 ### Overview
-Each skill has its own fine-tuned binary classifier running on Apple Silicon via MLX.
-Replaces the single 9B LM Studio router with tiny per-skill experts.
+A single unified Qwen3.5-2B model with LoRA adapter classifies transcripts into
+zero or more tool calls using native `<tool_call>` tokens. Replaces the previous
+per-skill binary expert architecture (and the original 9B LM Studio router before that).
 
 ### Base Model
-**Qwen3.5-0.8B** (Apache 2.0)
+**Qwen3.5-2B** (Apache 2.0)
 - Hybrid architecture: Gated DeltaNet + Gated Attention
-- 0.9B params, ~1GB 8-bit on disk
-- Native vision-language model, used text-only for classification
-- Chat template pre-trained for LoRA PEFT (no embedding fine-tuning needed)
+- 1.9B params, ~2.5GB in 8-bit on Apple Silicon
+- BFCL-V4 score 43.6 — beats Qwen3-4B on agent/tool tasks
+- Native tool calling tokens: `<tool_call>` (248058), `</tool_call>` (248059)
+- 262K context window
+
+### Tool Definitions
+```
+music.play       — Start playing music or a specific song/playlist
+music.pause      — Pause currently playing music
+music.resume     — Resume paused music
+music.skip       — Skip to next track
+music.previous   — Go back to previous track
+music.volume_up  — Increase volume
+music.volume_down — Decrease volume
+wellbeing.check_in — First-person negative self-talk, burnout, self-doubt, imposter syndrome
+```
 
 ### Training Pipeline (autoresearch-inspired)
 ```
 experts/
 ├── experts/
-│   ├── config.py      # Shared config (base model, skills, defaults)
-│   ├── generate.py    # READ-ONLY: data generation + augmentation
-│   ├── evaluate.py    # READ-ONLY: eval against test set, compute F1
-│   ├── train.py       # AGENT-EDITABLE: LoRA fine-tuning
-│   └── serve.py       # HTTP server for Bun integration
+│   ├── config.py                      # Shared config (base model, tools, defaults)
+│   ├── generate.py                    # READ-ONLY: per-skill data gen (templates)
+│   ├── evaluate.py                    # READ-ONLY: per-skill eval
+│   ├── train.py                       # Per-skill training (legacy fallback)
+│   ├── serve.py                       # Per-skill worker pool server (legacy fallback)
+│   ├── generate_multitool.py          # Multi-tool data gen with dedup + stratified split
+│   ├── evaluate_multitool.py          # Multi-tool eval with VALID_TOOLS allowlist parser
+│   ├── evaluate_multitool_integration.py  # 64-case integration eval
+│   ├── train_multitool.py             # Unified LoRA fine-tuning (rank 16, 12 layers)
+│   └── serve_multitool.py             # Single-model HTTP server, backward-compatible API
 ├── data/
-│   ├── music/         # train.jsonl, valid.jsonl, test.jsonl
-│   └── wellbeing/
+│   └── multitool/                     # train.jsonl, valid.jsonl, test.jsonl (291 entries)
 ├── models/
-│   ├── music/         # adapters.safetensors/, eval_test.json
-│   └── wellbeing/
-└── program.md         # Human-editable methodology spec
+│   └── multitool/                     # adapters.safetensors/, train_meta.json, eval_test.json
+└── program.md                         # Human-editable methodology spec
 ```
 
-### Results (2026-03-10)
+### Training Data (Round 4)
+- 291 entries after dedup, 57.4% positive, 30 dual-activation, 124 negative
+- Stratified split: train 202, valid 42, test 47
+- Sources: eval cases (64), music templates (55), wellbeing templates (46),
+  dual templates (30), hard negatives (20+20), general negatives (20),
+  real-log negatives (56), extra wellbeing (10)
 
-| Skill | Baseline F1 | Fine-tuned F1 | Action Acc | Latency |
-|-------|-------------|---------------|------------|---------|
-| Music | 94.7% | 100.0% | 77.8% | 278ms |
-| Wellbeing | 60.0% | 100.0% | 100.0% | 258ms |
+### Training Hyperparameters
+- LoRA rank: 16, layers: 12, LR: 5e-5, batch size: 2, iterations: 300
+- `--mask-prompt`: only trains on response (tool call output), not system prompt
+- Peak memory: 14.6GB, training time: ~8 minutes on Apple Silicon
 
-Previous 9B router: 86% accuracy, 1.4s latency.
+### Results — Evolution
 
-### Key Learnings
+| Round | Model | Changes | Accuracy | Dual | Negatives | Avg Latency |
+|-------|-------|---------|----------|------|-----------|-------------|
+| 1 | 0.8B | Initial (22 cases) | 22/22 (100%) | 2/2 | 7/7 | 252ms |
+| 2 | 0.8B | +negatives, +dedup, +stratified (64 cases) | 59/64 (92.2%) | 0/4 | 34/35 | 234ms |
+| 3 | 0.8B | +more dual examples (15→30) | 61/64 (95.3%) | 3/4 | 33/35 | 243ms |
+| 4 | 0.8B | +imposter reinforcement | 60/64 (93.8%) | 3/4 | 33/35 | 239ms |
+| **5** | **2B** | **Model upgrade to Qwen3.5-2B** | **63/64 (98.4%)** | **4/4** | **34/35** | **368ms** |
 
-1. **Qwen3.5-0.8B is already strong for classification** — baseline F1 of 94.7% for music
-   without any fine-tuning. The model's chat template + system prompt is enough for basic routing.
+Round 1 was on the original 22-case set; rounds 2-5 on the expanded 64-case set.
 
-2. **Class imbalance kills recall** — First wellbeing attempt (37% positive) gave 0% recall.
-   Expanding to 42% positive + lower LR (5e-5 vs 1e-4) fixed it completely.
-
-3. **LoRA is incredibly efficient** — 200 iters, batch size 2, 8 layers, rank 8.
-   Music trained in 125s, wellbeing in 255s. Peak memory ~5.9GB.
-
-4. **mlx-lm API changes** — `temp` parameter removed from `generate()`.
-   Use `sampler=` with `mx.argmax` for greedy decoding instead.
-
-5. **Adapter path is a directory** — `--adapter-path` in mlx-lm creates a directory
-   (not a file) containing `adapters.safetensors` + checkpoints.
-
-6. **`--mask-prompt` is essential** — Only trains on the response JSON, not the
-   system prompt. Dramatically improves training efficiency for classification.
-
-### Expert vs Router Architecture
+### Architecture Diagram
 ```
-OLD (single router):
+OLD (single router, deprecated):
   Transcript → [9B LM Studio] → {skills: [{skill: "music", action: "play"}]}
   ~1,400ms per call, 86% accuracy
 
-CURRENT (parallel worker processes):
+PREVIOUS (parallel per-skill experts):
   Bun → POST /v1/classify → HTTP server → dispatch to worker pool
-                             ├─ [Worker 1: music LoRA]    → {match, action, latency}
-                             └─ [Worker 2: wellbeing LoRA] → {match, action, latency}
-                             ← merge results + wall/sum/gain metrics
-  ~286ms avg, 95.5% accuracy (21/22), ~1.7-2× parallel gain
+                             ├─ [Worker 1: music LoRA]    → {match, action}
+                             └─ [Worker 2: wellbeing LoRA] → {match, action}
+                             ← merge results
+  ~286ms avg, 95.5% accuracy (21/22)
+
+CURRENT (unified multi-tool):
+  Bun → POST /v1/classify → serve_multitool.py → single Qwen3.5-2B + LoRA
+                             → parse <tool_call> blocks → VALID_TOOLS filter
+                             ← {skills: [{skill, action, confidence}]}
+  ~368ms avg, 98.4% accuracy (63/64), supports dual-activation
 ```
 
-### Parallel Inference — MLX on Apple Silicon
+### Key Learnings
 
-**What works:**
-- **Separate processes** — each worker gets its own Metal device context with
-  independent command buffers. Workers run truly in parallel on Apple Silicon.
-- Architecture: HTTP coordinator (no Metal) → mp.Queue → pre-warmed workers
-- Memory: ~1GB per worker (0.8B model), ~2GB total for 2 skills
+1. **Single unified model beats per-skill experts** — one 2B model with tool definitions
+   in the system prompt achieves 98.4% on a much harder 64-case eval set vs 95.5% on
+   the original 22-case set with per-skill experts.
 
-**What does NOT work:**
-- **Python threading** — MLX shares a single Metal command buffer across threads.
-  Two threads calling `mlx_lm.generate()` simultaneously hit:
-  `-[_MTLCommandBuffer addCompletedHandler:]:1011: failed assertion`
-- **mx.Stream (separate GPU queues)** — `mlx_lm.generate()` internally calls
-  `mx.eval()` which synchronizes globally, so separate streams don't isolate.
+2. **Dual-activation works** — the model can emit multiple `<tool_call>` blocks in one
+   response. 4/4 dual cases pass at 2B (was 3/4 at 0.8B, 0/4 initially).
 
-**Measured results (2026-03-10):**
+3. **Tool definitions in system prompt are critical** — without them, the model
+   hallucinated actions like `music.dislike`. Adding explicit tool list + VALID_TOOLS
+   allowlist in the parser fixed this.
 
-| Architecture | Avg latency | Eval time | Parallel gain |
-|-------------|-------------|-----------|---------------|
-| Sequential (single process) | 445ms | 9.8s | 1.0× |
-| Worker processes (parallel) | 286ms | 6.3s | ~1.7-2.0× |
+4. **Training data deduplication prevents contradictory labels** — same transcript
+   appeared as both single-skill and dual-skill. Dedup keeps the dual version.
 
-### Remaining Eval Failure
+5. **Stratified splitting prevents empty categories** — random shuffle with 291 examples
+   left 0 dual cases in test split. Stratified split ensures proportional representation.
 
-Case: "skip this stupid song, I'm such an idiot for adding it"
-- Music expert misses "skip" — the emotionally loaded phrasing dominates
-- Similar phrases with less personal language ("I feel like a failure") DO trigger both
-- Fix: add adversarial training examples with music commands in emotional sentences
+6. **Real production logs are gold for eval** — mined 33 cases from
+   `/tmp/listen-events.jsonl` and `/tmp/listen-session-*.json`, including false positives
+   (song lyrics triggering wellbeing), ASR artifacts, ambient speech.
+
+7. **Class imbalance kills recall** — First wellbeing attempt (37% positive) gave 0%
+   recall. Expanding to 42% positive + lower LR (5e-5 vs 1e-4) fixed it completely.
+
+8. **mlx-lm API changes** — `temp` parameter removed from `generate()`.
+   Use `sampler=` with `mx.argmax` for greedy decoding instead.
+
+9. **Adapter path is a directory** — `--adapter-path` in mlx-lm creates a directory
+   containing `adapters.safetensors` + checkpoints.
+
+10. **MLX parallel inference** — Python threading crashes MLX (shared Metal command
+    buffer). Separate processes work but aren't needed with the unified model.
+
+### Remaining Failure (Round 5)
+- "not good enough" (real log watchlist) — model correctly fires `wellbeing.check_in`
+  but also spuriously adds `music.skip`. Over-activation, not a miss.
+- Fix: add negative reinforcement examples where "not good enough" appears without
+  music context.
+
+### Backward Compatibility
+- The old per-skill pipeline (generate.py, train.py, evaluate.py, serve.py) still works
+  as a fallback. Per-skill adapters remain in `models/music/` and `models/wellbeing/`.
+- `serve_multitool.py` exposes the same `/v1/classify` API — the Bun client
+  (`classify.ts`) needs zero code changes.

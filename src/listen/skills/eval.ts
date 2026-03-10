@@ -76,7 +76,7 @@ async function loadCases(): Promise<EvalCase[]> {
   const file = (values["cases-file"] as string) || resolve(import.meta.dir, "eval-cases.json");
   const raw = await readFile(file, "utf-8");
   const data = JSON.parse(raw);
-  let cases: EvalCase[] = data.cases || [];
+  let cases: EvalCase[] = (data.cases || []).filter((c: any) => c.name);
 
   if (FILTER) {
     const f = FILTER.toLowerCase();

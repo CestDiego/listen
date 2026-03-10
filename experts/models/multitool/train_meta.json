@@ -1,0 +1,14 @@
+{
+  "model_type": "multitool",
+  "base_model": "Qwen/Qwen3.5-2B",
+  "adapter_path": "/Users/diego/Projects/listen/experts/models/multitool/adapters.safetensors",
+  "lora_rank": 16,
+  "lora_layers": 12,
+  "learning_rate": 5e-05,
+  "batch_size": 2,
+  "iters": 300,
+  "train_examples": 202,
+  "valid_examples": 42,
+  "elapsed_seconds": 487.2,
+  "timestamp": "2026-03-10 14:34:47"
+}

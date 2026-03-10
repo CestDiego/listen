@@ -1,0 +1,24 @@
+adapter_path: /Users/diego/Projects/listen/experts/models/multitool/adapters.safetensors
+batch_size: 2
+data: /Users/diego/Projects/listen/experts/data/multitool
+fine_tune_type: lora
+iters: 300
+learning_rate: 5.0e-05
+lora_parameters:
+  alpha: 32
+  dropout: 0.05
+  rank: 16
+  scale: 1.0
+mask_prompt: true
+max_seq_length: 1024
+model: Qwen/Qwen3.5-2B
+num_layers: 12
+optimizer: adamw
+save_every: 50
+seed: 42
+steps_per_eval: 50
+steps_per_report: 10
+test: true
+test_batches: -1
+train: true
+val_batches: -1

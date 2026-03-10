@@ -9,10 +9,11 @@ MODELS_DIR = ROOT / "models"
 SKILLS_DIR = ROOT / "skills"
 
 # ── Base model ─────────────────────────────────────────────────────
-# Qwen3.5-0.8B — small enough for fast LoRA, big enough for classification.
-# We use the instruct model (not base) since it already has a chat template
-# trained for LoRA PEFT without needing to fine-tune embeddings.
-BASE_MODEL = "Qwen/Qwen3.5-0.8B"
+# Qwen3.5-2B — step up from 0.8B for better multi-tool calling.
+# Same hybrid DeltaNet architecture, BFCL-V4 score 43.6 (beats Qwen3-4B
+# on agent/tool tasks). Native <tool_call> tokens, Apache 2.0.
+# Memory: ~2.5GB in 8-bit, fits comfortably on Apple Silicon.
+BASE_MODEL = "Qwen/Qwen3.5-2B"
 
 # ── Training defaults ──────────────────────────────────────────────
 DEFAULT_LORA_RANK = 8

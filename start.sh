@@ -153,15 +153,13 @@ if [ ! -d "$MODEL_DIR" ]; then
     exit 1
 fi
 
-# ── Check expert adapters ──────────────────────────────────────────
-MUSIC_ADAPTER="$EXPERTS_DIR/models/music/adapters.safetensors"
-WELLBEING_ADAPTER="$EXPERTS_DIR/models/wellbeing/adapters.safetensors"
-if [ ! -d "$MUSIC_ADAPTER" ] || [ ! -d "$WELLBEING_ADAPTER" ]; then
-    warn "expert adapters not found. Training now..."
+# ── Check multi-tool adapter ───────────────────────────────────────
+MULTITOOL_ADAPTER="$EXPERTS_DIR/models/multitool/adapters.safetensors"
+if [ ! -d "$MULTITOOL_ADAPTER" ]; then
+    warn "multi-tool adapter not found. Training now..."
     cd "$EXPERTS_DIR"
-    uv run python3 -m experts.generate
-    [ ! -d "$MUSIC_ADAPTER" ] && uv run python3 -m experts.train --skill music
-    [ ! -d "$WELLBEING_ADAPTER" ] && uv run python3 -m experts.train --skill wellbeing
+    uv run python3 -m experts.generate_multitool
+    uv run python3 -m experts.train_multitool
     cd "$SCRIPT_DIR"
 fi
 
@@ -174,7 +172,7 @@ sleep 0.5
 # ── Start MLX expert server ────────────────────────────────────────
 info "starting MLX expert server on :$EXPERT_PORT..."
 cd "$EXPERTS_DIR"
-uv run python3 -m experts.serve --port $EXPERT_PORT &
+uv run python3 -m experts.serve_multitool --port $EXPERT_PORT &
 EXPERT_PID=$!
 cd "$SCRIPT_DIR"
 
