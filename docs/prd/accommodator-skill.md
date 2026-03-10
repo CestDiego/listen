@@ -3,6 +3,13 @@
 ## Update Log
 
 - 2026-03-10: Initial draft
+- 2026-03-10: **Implementation complete** — all 5 phases implemented across parallel worktrees:
+  - Phase 1: Playlist infrastructure (config.yaml, download script, directory scaffolding)
+  - Phase 2: Audio engine (afplay/ffplay backend with crossfade, queue management, 19 tests)
+  - Phase 3: Accommodator skill (circumplex mapping, ISO state machine, intent vector integration, 16 tests)
+  - Phase 4: Classifier retrain (eval cases remapped, classify/router/types updated from music.* to accommodator.*)
+  - Phase 5: Dashboard (Accommodator tab with circumplex quadrant display, ISO progress bar, SSE emission)
+  - Post-review fixes: crossfade race condition, subprocess leak on shutdown, getState() numeric field passthrough, playlist drift reload
 
 ## Overview
 

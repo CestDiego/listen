@@ -66,6 +66,13 @@ async function shutdown(signal: string): Promise<void> {
   running = false;
 
   console.log(`\n  ⏹  stopping listen... (${signal})`);
+
+  // Stop accommodator audio (prevents orphaned afplay/ffplay subprocesses)
+  try {
+    const { disposeAccommodator } = await import("./skills/accommodator");
+    await disposeAccommodator();
+  } catch { /* accommodator not loaded */ }
+
   if (activeSession) {
     await activeSession.save();
     console.log("  💾 session saved.");

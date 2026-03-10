@@ -230,10 +230,21 @@ class AccommodatorEngine {
     this.scheduleMatchToSteer();
   }
 
-  /** Deactivate — fade out and stop. */
+  /** Deactivate — fade out, stop, and clean up listeners. */
   async deactivate(): Promise<void> {
     this.clearTimers();
     await this.audio.fadeOut(this.config.crossfadeDurationMs);
+    this.iso = this.freshISO();
+  }
+
+  /** Clean up resources (call on shutdown to prevent orphaned subprocesses). */
+  async dispose(): Promise<void> {
+    this.clearTimers();
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+    }
+    await this.audio.stop();
     this.iso = this.freshISO();
   }
 
@@ -290,7 +301,10 @@ class AccommodatorEngine {
     if (this.iso.status === "arrived") {
       const selection = selectQuadrant(mood, energy, taskFocus, this.config);
       if (selection.quadrant !== this.iso.currentQuadrant && selection.confidence > 0.3) {
-        // Mood drifted — restart steering
+        // Mood drifted — crossfade to new quadrant and restart steering
+        const playlistDir = join(this.config.playlistDir, selection.quadrant);
+        this.audio.crossfadeTo(playlistDir, selection.quadrant);
+
         this.iso.status = "matching";
         this.iso.phaseStartMs = Date.now();
         this.iso.currentQuadrant = selection.quadrant;
@@ -475,6 +489,9 @@ export const accommodatorSkill: Skill = {
       quadrant: state.quadrant,
       target: state.target,
       track: state.track,
+      volume: String(state.volume),
+      steerStep: String(state.steerStep),
+      steerTotal: String(state.steerTotal),
     };
   },
 
@@ -535,4 +552,15 @@ export function connectAccommodatorToIntentVector(
   onUpdate: (fn: IntentVectorListener) => () => void,
 ): void {
   getEngine().subscribe(onUpdate);
+}
+
+/**
+ * Dispose the Accommodator engine — kills audio subprocesses and cleans up.
+ * Called during shutdown to prevent orphaned afplay/ffplay processes.
+ */
+export async function disposeAccommodator(): Promise<void> {
+  if (engine) {
+    await engine.dispose();
+    engine = null;
+  }
 }

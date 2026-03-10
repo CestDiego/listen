@@ -292,9 +292,11 @@ export class AudioEngine {
       );
     }
 
-    // Auto-advance when track finishes
-    this.state.currentProcess.exited.then(() => {
-      if (this.state.playing && this.state.queue.length > 0) {
+    // Auto-advance when track finishes — only if this is still the current process
+    // (prevents race condition during crossfade where old process exit kills new track)
+    const proc = this.state.currentProcess;
+    proc.exited.then(() => {
+      if (this.state.currentProcess === proc && this.state.playing && this.state.queue.length > 0) {
         this.state.queueIndex = (this.state.queueIndex + 1) % this.state.queue.length;
         this.playFile(this.state.queue[this.state.queueIndex]);
       }
