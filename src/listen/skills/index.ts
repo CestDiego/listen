@@ -28,12 +28,17 @@ export { SkillRegistry } from "./registry";
 export { classifyTranscript } from "./classify";
 export { wellbeingSkill } from "./wellbeing";
 export { musicSkill } from "./music";
+export { accommodatorSkill, connectAccommodatorToIntentVector } from "./accommodator";
 
 // ── Default skill set ─────────────────────────────────────────────
 
 import type { Skill } from "./types";
 import { wellbeingSkill } from "./wellbeing";
-import { musicSkill } from "./music";
+import { accommodatorSkill } from "./accommodator";
 
-/** All built-in skills. Register these with the SkillRegistry. */
-export const DEFAULT_SKILLS: Skill[] = [wellbeingSkill, musicSkill];
+/**
+ * All built-in skills. Register these with the SkillRegistry.
+ * NOTE: musicSkill removed from DEFAULT_SKILLS — no longer a classifier target.
+ * It remains importable for legacy/override use.
+ */
+export const DEFAULT_SKILLS: Skill[] = [wellbeingSkill, accommodatorSkill];

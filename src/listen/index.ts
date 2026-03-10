@@ -103,6 +103,15 @@ async function initSystems(
   const intentVector = new IntentVectorStore();
   const activationGate = new ActivationGate();
 
+  // Connect Accommodator to intent vector updates (if registered)
+  try {
+    const { connectAccommodatorToIntentVector } = await import("./skills/accommodator");
+    connectAccommodatorToIntentVector((fn) => intentVector.onUpdate(fn));
+    console.log("  🎭 accommodator: connected to intent vector");
+  } catch {
+    // Accommodator not available — skip
+  }
+
   // Web dashboard (SSE live updates + optional transcript POST handler)
   startDashboard(session, onTranscript);
 
