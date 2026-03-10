@@ -25,13 +25,13 @@ DEFAULT_ITERS = 200            # Starting point — autoresearch may adjust
 # ── Skills ─────────────────────────────────────────────────────────
 # Each skill gets its own binary expert: "does this transcript match me?"
 SKILLS = {
-    "music": {
-        "actions": ["play", "pause", "resume", "skip", "previous", "volume_up", "volume_down"],
-        "description": "Music playback control commands",
-    },
     "wellbeing": {
         "actions": ["check_in"],
         "description": "Negative self-talk, burnout, self-doubt, imposter syndrome",
+    },
+    "accommodator": {
+        "actions": ["activate", "deactivate", "set_target"],
+        "description": "Mood-adaptive music and environment adjustment",
     },
 }
 
@@ -41,64 +41,32 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "music.play",
-            "description": "Start playing music or play a specific song/playlist.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "music.pause",
-            "description": "Pause the currently playing music.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "music.resume",
-            "description": "Resume paused music.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "music.skip",
-            "description": "Skip to the next song/track.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "music.previous",
-            "description": "Go back to the previous song/track.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "music.volume_up",
-            "description": "Increase the music volume.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "music.volume_down",
-            "description": "Decrease the music volume.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "wellbeing.check_in",
             "description": "Triggered when the user expresses first-person negative self-talk, burnout, self-doubt, imposter syndrome, or emotional distress. NOT for third-person reports or casual tiredness.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accommodator.activate",
+            "description": "User wants mood-adaptive music or environment adjustment. Covers requests to play music, start listening, or engage the mood-responsive system.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accommodator.deactivate",
+            "description": "User wants to stop mood accommodation. Covers requests to stop, pause, or turn off the adaptive music/environment system.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accommodator.set_target",
+            "description": "User explicitly states a desired mood or preference. Examples: 'I want to feel calm', 'help me focus', 'I like jazz', 'something upbeat please'.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },

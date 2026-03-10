@@ -32,7 +32,7 @@ from .config import BASE_MODEL, DATA_DIR, MODELS_DIR, TOOL_DEFINITIONS
 
 # ── Tool call parsing ─────────────────────────────────────────────
 
-# Allowlist of valid tool names — rejects hallucinated actions like "music.dislike"
+# Allowlist of valid tool names — rejects hallucinated actions like "accommodator.unknown"
 VALID_TOOLS = {t["function"]["name"] for t in TOOL_DEFINITIONS}
 
 # Regex: only match word chars + dots in function name (no injection)

@@ -8,7 +8,7 @@ Output format per example:
   {"messages": [
     {"role": "system", "content": "You are...\\n<tools>...</tools>"},
     {"role": "user", "content": "<transcript>"},
-    {"role": "assistant", "content": "<tool_call>\\n<function=music.skip>\\n</function>\\n</tool_call>"}
+    {"role": "assistant", "content": "<tool_call>\\n<function=accommodator.activate>\\n</function>\\n</tool_call>"}
   ]}
 
 For negatives (no tools should fire):
@@ -16,10 +16,11 @@ For negatives (no tools should fire):
 
 Data sources:
   1. Eval cases (ground truth, including dual-activation)
-  2. Synthetic single-skill positives (from existing templates)
-  3. Synthetic dual-skill positives (music + wellbeing combos)
-  4. Hard negatives (domain-adjacent but shouldn't fire)
-  5. General negatives
+  2. Synthetic single-skill positives (from existing templates, remapped to accommodator.*)
+  3. Synthetic dual-skill positives (accommodator + wellbeing combos)
+  4. New accommodator-specific positives
+  5. Hard negatives (domain-adjacent but shouldn't fire)
+  6. General negatives
 
 This file follows autoresearch convention — infrastructure, not tuned.
 """
@@ -82,7 +83,7 @@ def format_tool_call(function_name: str) -> str:
 
 
 def format_tool_calls(calls: list[str]) -> str:
-    """Format multiple tool calls. Empty list → 'No tools needed.'"""
+    """Format multiple tool calls. Empty list -> 'No tools needed.'"""
     if not calls:
         return "No tools needed."
     return "\n".join(format_tool_call(name) for name in calls)
@@ -102,76 +103,88 @@ def make_entry(transcript: str, tool_calls: list[str]) -> dict[str, Any]:
     }
 
 
+# ── Map old music actions to new accommodator tools ───────────────
+MUSIC_TO_ACCOMMODATOR = {
+    "play": "accommodator.activate",
+    "pause": "accommodator.deactivate",
+    "resume": "accommodator.activate",
+    "skip": "accommodator.activate",
+    "previous": "accommodator.activate",
+    "volume_up": "accommodator.set_target",
+    "volume_down": "accommodator.set_target",
+}
+
+
 # ── Dual-activation templates ────────────────────────────────────
-# Transcripts where BOTH music and wellbeing should fire.
+# Transcripts where BOTH accommodator and wellbeing should fire.
 
 DUAL_TEMPLATES: list[dict[str, Any]] = [
-    # ── skip + wellbeing ──
+    # ── activate + wellbeing (was: skip + wellbeing) ──
     {"transcript": "skip this stupid song, I'm such an idiot for adding it",
-     "tools": ["music.skip", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "skip this, it's making me feel worse about myself",
-     "tools": ["music.skip", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "next song please, I can't listen to this right now, I'm falling apart",
-     "tools": ["music.skip", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "change the song, this one reminds me of how much I've failed",
-     "tools": ["music.skip", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "skip this track, I hate everything about myself right now",
-     "tools": ["music.skip", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "skip it, I can't stand this, I'm so useless",
-     "tools": ["music.skip", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "next please, this song is making me cry and I already feel worthless",
-     "tools": ["music.skip", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "skip this garbage, I'm the worst for picking this playlist",
-     "tools": ["music.skip", "wellbeing.check_in"]},
-    # ── pause + wellbeing ──
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+    # ── deactivate + wellbeing (was: pause + wellbeing) ──
     {"transcript": "pause the music, I need a break, I'm burning out",
-     "tools": ["music.pause", "wellbeing.check_in"]},
+     "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
     {"transcript": "stop the music, I can't take this anymore",
-     "tools": ["music.pause", "wellbeing.check_in"]},
+     "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
     {"transcript": "pause it, I'm so overwhelmed I can barely think",
-     "tools": ["music.pause", "wellbeing.check_in"]},
+     "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
     {"transcript": "just stop everything, I can't deal with this right now, I'm worthless",
-     "tools": ["music.pause", "wellbeing.check_in"]},
+     "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
     {"transcript": "hold the music, I need to cry for a second",
-     "tools": ["music.pause", "wellbeing.check_in"]},
+     "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
     {"transcript": "pause, I need a moment, I feel like I'm losing my mind",
-     "tools": ["music.pause", "wellbeing.check_in"]},
+     "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
     {"transcript": "stop playing, I'm having a breakdown and I can't handle noise",
-     "tools": ["music.pause", "wellbeing.check_in"]},
+     "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
     {"transcript": "mute the music, I'm drowning in work and I hate myself",
-     "tools": ["music.pause", "wellbeing.check_in"]},
-    # ── play + wellbeing ──
+     "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
+    # ── activate + wellbeing (was: play + wellbeing) ──
     {"transcript": "play something calming, I'm having a terrible day and I hate myself",
-     "tools": ["music.play", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "put on some music, I feel so broken inside",
-     "tools": ["music.play", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "play my sad playlist, I'm such a failure at everything",
-     "tools": ["music.play", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "play something gentle, I've been crying all afternoon",
-     "tools": ["music.play", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "start the music, maybe it'll help, I feel completely empty inside",
-     "tools": ["music.play", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "put on some tunes, I need to distract myself from how much I hate myself",
-     "tools": ["music.play", "wellbeing.check_in"]},
-    # ── volume + wellbeing ──
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+    # ── set_target + wellbeing (was: volume + wellbeing) ──
     {"transcript": "turn it down, my head is killing me and I can't cope with anything",
-     "tools": ["music.volume_down", "wellbeing.check_in"]},
+     "tools": ["accommodator.set_target", "wellbeing.check_in"]},
     {"transcript": "louder please, I need to drown out these thoughts about how worthless I am",
-     "tools": ["music.volume_up", "wellbeing.check_in"]},
+     "tools": ["accommodator.set_target", "wellbeing.check_in"]},
     {"transcript": "quieter, I can barely function and the noise is making it worse",
-     "tools": ["music.volume_down", "wellbeing.check_in"]},
+     "tools": ["accommodator.set_target", "wellbeing.check_in"]},
     {"transcript": "crank it up, I need to stop hearing myself think about what a failure I am",
-     "tools": ["music.volume_up", "wellbeing.check_in"]},
-    # ── previous + wellbeing ──
+     "tools": ["accommodator.set_target", "wellbeing.check_in"]},
+    # ── activate + wellbeing (was: previous + wellbeing) ──
     {"transcript": "go back to the last song, it was the only thing keeping me from breaking down",
-     "tools": ["music.previous", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "previous track please, I need that song back, I'm not doing okay",
-     "tools": ["music.previous", "wellbeing.check_in"]},
-    # ── resume + wellbeing ──
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
+    # ── activate + wellbeing (was: resume + wellbeing) ──
     {"transcript": "unpause the music, the silence is making me spiral into negative thoughts",
-     "tools": ["music.resume", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
     {"transcript": "continue playing, the quiet makes me think about how much I've messed up",
-     "tools": ["music.resume", "wellbeing.check_in"]},
+     "tools": ["accommodator.activate", "wellbeing.check_in"]},
 ]
 
 
@@ -189,7 +202,7 @@ EXTRA_WELLBEING_POSITIVES: list[str] = [
     "people are going to find out I'm a fraud and I'll lose everything",
     "my coworkers are going to realize I'm not as smart as they think",
     "when they see my work they'll know I'm just pretending",
-    # First-person with "stop everything" pattern (ambiguous with music.pause)
+    # First-person with "stop everything" pattern (ambiguous with accommodator.deactivate)
     "I just want to stop existing sometimes",
     "I need everything to just stop, I can't keep going like this",
 ]
@@ -264,6 +277,45 @@ REAL_LOG_NEGATIVES: list[str] = [
 ]
 
 
+# ── Accommodator-specific positives ──────────────────────────────
+# New examples that don't exist in the old music templates.
+
+ACCOMMODATOR_POSITIVES: dict[str, list[str]] = {
+    "activate": [
+        "play some music that matches my mood",
+        "start the mood music",
+        "can you put on something that fits the vibe",
+        "I want some background music",
+        "turn on the accommodator",
+        "start listening to my mood",
+    ],
+    "deactivate": [
+        "stop the music please",
+        "turn off the mood music",
+        "I don't want music right now",
+        "silence please",
+        "mute everything",
+        "stop accommodating",
+        "turn off the background music",
+        "I need quiet",
+    ],
+    "set_target": [
+        "I want to feel calm",
+        "help me focus",
+        "I need something upbeat",
+        "play something relaxing",
+        "I'm in the mood for jazz",
+        "something energetic please",
+        "I want to wind down",
+        "can you help me concentrate",
+        "I need to chill out",
+        "play something happy",
+        "I want peaceful vibes",
+        "something to help me study",
+    ],
+}
+
+
 # ── Data generation ───────────────────────────────────────────────
 
 def load_eval_cases() -> list[dict[str, Any]]:
@@ -276,9 +328,19 @@ def load_eval_cases() -> list[dict[str, Any]]:
 
 
 def eval_case_to_tool_calls(case: dict[str, Any]) -> list[str]:
-    """Convert an eval case's expected skills to tool call names."""
+    """Convert an eval case's expected skills to tool call names.
+
+    Remaps old music.* tool names to new accommodator.* tools.
+    """
     skills = case["expect"].get("skills", [])
-    return [f"{s['skill']}.{s['action']}" for s in skills]
+    result = []
+    for s in skills:
+        tool_name = f"{s['skill']}.{s['action']}"
+        # Remap old music actions to accommodator
+        if s["skill"] == "music":
+            tool_name = MUSIC_TO_ACCOMMODATOR.get(s["action"], "accommodator.activate")
+        result.append(tool_name)
+    return result
 
 
 def _deduplicate(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -354,16 +416,16 @@ def generate_multitool_data(seed: int = 42) -> tuple[list[dict], list[dict], lis
     rng = random.Random(seed)
     entries: list[dict[str, Any]] = []
 
-    # 1. Seed from eval cases (ground truth)
+    # 1. Seed from eval cases (ground truth, remapped to accommodator.*)
     for case in load_eval_cases():
         transcript = case["transcript"]
         tool_calls = eval_case_to_tool_calls(case)
         entries.append(make_entry(transcript, tool_calls))
 
-    # 2. Synthetic single-skill positives: music
+    # 2. Synthetic single-skill positives: music templates -> remapped to accommodator
     for action_idx, templates in enumerate(MUSIC_POSITIVE_TEMPLATES):
         action = MUSIC_ACTIONS[action_idx]
-        tool_name = f"music.{action}"
+        tool_name = MUSIC_TO_ACCOMMODATOR.get(action, "accommodator.activate")
         for t in templates:
             entries.append(make_entry(t, [tool_name]))
 
@@ -371,25 +433,31 @@ def generate_multitool_data(seed: int = 42) -> tuple[list[dict], list[dict], lis
     for t in WELLBEING_POSITIVE_TEMPLATES:
         entries.append(make_entry(t, ["wellbeing.check_in"]))
 
-    # 4. Dual-activation examples
+    # 4. New accommodator-specific positives
+    for action, templates in ACCOMMODATOR_POSITIVES.items():
+        tool_name = f"accommodator.{action}"
+        for t in templates:
+            entries.append(make_entry(t, [tool_name]))
+
+    # 5. Dual-activation examples
     for dual in DUAL_TEMPLATES:
         entries.append(make_entry(dual["transcript"], dual["tools"]))
 
-    # 5. Hard negatives (domain-adjacent, no tools)
+    # 6. Hard negatives (domain-adjacent, no tools)
     for t in MUSIC_NEGATIVES:
         entries.append(make_entry(t, []))
     for t in WELLBEING_NEGATIVES:
         entries.append(make_entry(t, []))
 
-    # 6. General negatives
+    # 7. General negatives
     for t in GENERAL_NEGATIVES:
         entries.append(make_entry(t, []))
 
-    # 7. Real-log negatives + action-sounding phrases
+    # 8. Real-log negatives + action-sounding phrases
     for t in REAL_LOG_NEGATIVES:
         entries.append(make_entry(t, []))
 
-    # 8. Extra wellbeing positives (imposter syndrome reinforcement)
+    # 9. Extra wellbeing positives (imposter syndrome reinforcement)
     for t in EXTRA_WELLBEING_POSITIVES:
         entries.append(make_entry(t, ["wellbeing.check_in"]))
 
