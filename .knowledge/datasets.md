@@ -24,7 +24,7 @@
 
 ## By Dimension
 
-### 1. Multi-Tool Classifier (music.*, wellbeing.check_in, future skills)
+### 1. Multi-Tool Classifier (accommodator.*, wellbeing.check_in, future skills)
 
 **Goal**: Augment current 291-example training set with diverse intents + negatives.
 
@@ -46,13 +46,13 @@
 
 **Intent mapping**:
 ```
-Our Tool Call     → CLINC150        → MASSIVE           → Snips           → SLURP
-music.play        → play_music      → play_music        → PlayMusic       → music/play_music
-music.skip        → next_song       → —                 → —               → —
-music.volume_up   → change_volume   → audio_volume_up   → —               → audio/volume_up
-music.volume_down → change_volume   → audio_volume_down  → —               → audio/volume_down
-wellbeing.check_in → —              → —                 → —               → —
-(negative/OOS)    → oos (1,200)     → general_quirky    → —               → —
+Our Tool Call              → CLINC150        → MASSIVE           → Snips           → SLURP
+accommodator.activate      → play_music      → play_music        → PlayMusic       → music/play_music
+accommodator.skip          → next_song       → —                 → —               → —
+accommodator.set_target    → change_volume   → audio_volume_up   → —               → audio/volume_up
+accommodator.deactivate    → —               → —                 → —               → —
+wellbeing.check_in         → —               → —                 → —               → —
+(negative/OOS)             → oos (1,200)     → general_quirky    → —               → —
 ```
 
 ### 2. Mood [-1, 1] (sentiment/valence)

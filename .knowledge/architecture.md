@@ -17,14 +17,11 @@ per-skill binary expert architecture (and the original 9B LM Studio router befor
 
 ### Tool Definitions
 ```
-music.play       — Start playing music or a specific song/playlist
-music.pause      — Pause currently playing music
-music.resume     — Resume paused music
-music.skip       — Skip to next track
-music.previous   — Go back to previous track
-music.volume_up  — Increase volume
-music.volume_down — Decrease volume
-wellbeing.check_in — First-person negative self-talk, burnout, self-doubt, imposter syndrome
+accommodator.activate   — Start mood-responsive audio (matches mood, then steers via ISO principle)
+accommodator.deactivate — Stop mood accommodation, fade out playback
+accommodator.skip       — Skip to next track without restarting ISO state machine
+accommodator.set_target — Change target mood state (calm, uplift, focus, energize, release)
+wellbeing.check_in      — First-person negative self-talk, burnout, self-doubt, imposter syndrome
 ```
 
 ### Training Pipeline (autoresearch-inspired)
@@ -75,13 +72,13 @@ Round 1 was on the original 22-case set; rounds 2-5 on the expanded 64-case set.
 ### Architecture Diagram
 ```
 OLD (single router, deprecated):
-  Transcript → [9B LM Studio] → {skills: [{skill: "music", action: "play"}]}
+  Transcript → [9B LM Studio] → {skills: [{skill: "...", action: "..."}]}
   ~1,400ms per call, 86% accuracy
 
-PREVIOUS (parallel per-skill experts):
+PREVIOUS (parallel per-skill experts, deprecated):
   Bun → POST /v1/classify → HTTP server → dispatch to worker pool
-                             ├─ [Worker 1: music LoRA]    → {match, action}
-                             └─ [Worker 2: wellbeing LoRA] → {match, action}
+                             ├─ [Worker 1: skill LoRA]    → {match, action}
+                             └─ [Worker 2: skill LoRA]    → {match, action}
                              ← merge results
   ~286ms avg, 95.5% accuracy (21/22)
 
@@ -102,7 +99,7 @@ CURRENT (unified multi-tool):
    response. 4/4 dual cases pass at 2B (was 3/4 at 0.8B, 0/4 initially).
 
 3. **Tool definitions in system prompt are critical** — without them, the model
-   hallucinated actions like `music.dislike`. Adding explicit tool list + VALID_TOOLS
+   hallucinated actions (e.g. `music.dislike` pre-migration). Adding explicit tool list + VALID_TOOLS
    allowlist in the parser fixed this.
 
 4. **Training data deduplication prevents contradictory labels** — same transcript
@@ -129,7 +126,7 @@ CURRENT (unified multi-tool):
 
 ### Remaining Failure (Round 5)
 - "not good enough" (real log watchlist) — model correctly fires `wellbeing.check_in`
-  but also spuriously adds `music.skip`. Over-activation, not a miss.
+  but also spuriously adds a track action. Over-activation, not a miss.
 - Fix: add negative reinforcement examples where "not good enough" appears without
   music context.
 
@@ -186,7 +183,7 @@ and renders all charts dynamically — no hardcoded dimension lists in the front
 
 | Dimension | Range | Decay Half-Life | Source | Description |
 |-----------|-------|-----------------|--------|-------------|
-| `music` | [0, 1] | 45s | classifier | Classifier confidence (0.95 on match) |
+| `accommodator` | [0, 1] | 45s | classifier | Classifier confidence (0.95 on match) |
 | `wellbeing` | [0, 1] | 120s | classifier | Classifier confidence (0.83-0.95 on match) |
 | `engagement` | [0, 1] | 60s | computed | Chunks in last 60s / 12 (max expected) |
 | `taskFocus` | [0, 1] | 30s | computed | Ratio of skill-matched chunks in last 30s |
@@ -222,7 +219,7 @@ and renders all charts dynamically — no hardcoded dimension lists in the front
 
 ### Testing
 Run `bun run scripts/inject-test.ts` to inject a scripted sequence that exercises
-all dimensions: music commands, wellbeing triggers, neutral text, and decay pauses.
+all dimensions: accommodator triggers, wellbeing triggers, neutral text, and decay pauses.
 Requires `./start.sh` or manual pipeline + expert server startup.
 
 ---

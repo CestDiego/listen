@@ -20,7 +20,7 @@
 ## Immediate Next Steps
 1. **Push to origin** — 12 commits ahead, all clean. `git push` when ready.
 2. **Phase 3 dataset training** — download top-priority datasets (CLINC150, MASSIVE, Snips, GoEmotions) and augment the 291-example training set
-3. **Fix remaining eval failure** — "not good enough" triggers spurious `music.skip` alongside correct `wellbeing.check_in`. Add negative reinforcement examples.
+3. **Fix remaining eval failure** — "not good enough" triggers spurious track action alongside correct `wellbeing.check_in`. Add negative reinforcement examples.
 4. **Gate suppression logic** — suppress wellbeing promotion when another skill already matched at high confidence (>0.8) to avoid unnecessary dual-activation
 5. **Phase 3 LoRA classifiers** — train tiny LoRA classifiers for important computed dimensions (mood, energy) to replace/augment heuristic computation
 6. **Phase 4** — explore steering vectors from model activations (research in `.knowledge/intent-vectors.md`)
@@ -37,7 +37,7 @@ Swift MenuBar (Moonshine transcription, mic picker)
       → {skills: [{skill, action, confidence}]}
     → ActivationGate evaluation (hysteresis: idle→active→vigilant→idle)
     → IntentVectorStore.update() (decay + activate + compute hooks)
-    → Skill execution (music.ts, wellbeing via ElevenLabs)
+    → Skill execution (accommodator.ts, wellbeing via ElevenLabs)
     → SSE events → Dashboard (radar chart, sparklines, gate indicator)
 ```
 
@@ -60,7 +60,7 @@ Swift MenuBar (Moonshine transcription, mic picker)
 ### 6-Axis Intent Vector
 | Dimension | Range | Source | Half-Life | How |
 |-----------|-------|--------|-----------|-----|
-| `music` | [0,1] | classifier | 45s | Confidence on match (0.95) |
+| `accommodator` | [0,1] | classifier | 45s | Confidence on match (0.95) |
 | `wellbeing` | [0,1] | classifier | 120s | Confidence on match (0.83-0.95) |
 | `engagement` | [0,1] | computed | 60s | Chunks in last 60s / 12 |
 | `taskFocus` | [0,1] | computed | 30s | Skill-matched chunk ratio |
@@ -72,7 +72,7 @@ Swift MenuBar (Moonshine transcription, mic picker)
 - **Training data**: 291 entries (202 train / 42 valid / 47 test)
 - **Accuracy**: 98.4% (63/64), dual-activation 4/4, negatives 34/35
 - **Latency**: ~368ms avg on Apple Silicon
-- **Tools**: `music.play/pause/resume/skip/previous/volume_up/volume_down`, `wellbeing.check_in`
+- **Tools**: `accommodator.activate/deactivate/skip/set_target`, `wellbeing.check_in`
 
 ## Active Decisions
 - **[0,1] range for all dimensions** — classifier softmax outputs are natively [0,1]; decay math stays clean; composability (mood × energy stays in range); NRC VAD Lexicon speaks [0,1]. Dashboard formats for display.
@@ -82,7 +82,7 @@ Swift MenuBar (Moonshine transcription, mic picker)
 - **Config-driven dimensions** — `DIMENSION_DEFS` is the single source of truth. Engine, gate, and dashboard all derive from it. Adding a dimension = one config entry.
 
 ## Known Issues / Tech Debt
-- **1 eval failure**: "not good enough" triggers spurious `music.skip` alongside correct `wellbeing.check_in` (over-activation)
+- **1 eval failure**: "not good enough" triggers spurious track action alongside correct `wellbeing.check_in` (over-activation)
 - **Gate dual-activation ambiguity**: gate promotes wellbeing even when another skill already matched clearly — consider suppressing when non-target skill > 0.8 confidence
 - **15s decay pause insufficient for gate test**: 2B model catches "I'm just tired" in isolation, so idle→active→vigilant→idle cycle can't be fully verified with current test phrases
 - **Legacy per-skill pipeline still present**: `generate.py`, `train.py`, `evaluate.py`, `serve.py` + per-skill adapters in `models/music/`, `models/wellbeing/` — works as fallback but adds maintenance surface

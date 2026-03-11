@@ -2,7 +2,7 @@ adapter_path: /Users/diego/Projects/listen/experts/models/multitool/adapters.saf
 batch_size: 2
 data: /Users/diego/Projects/listen/experts/data/multitool
 fine_tune_type: lora
-iters: 300
+iters: 500
 learning_rate: 5.0e-05
 lora_parameters:
   alpha: 32

@@ -82,7 +82,7 @@ export interface RouterDecision {
   transcript: string;
   /** Rolling buffer context sent to the classifier */
   bufferContext: string;
-  /** Skill state at time of classification (e.g. "music: status=playing") */
+  /** Skill state at time of classification (e.g. "accommodator: status=matching") */
   skillState: string;
   /** Recent skill executions the classifier saw */
   recentSkills: Array<{

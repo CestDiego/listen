@@ -13,7 +13,7 @@ Endpoints:
 The response format is backward-compatible with the per-expert server:
   {
     "results": [
-      {"skill": "music", "match": true, "action": "skip", "latency_ms": 150},
+      {"skill": "accommodator", "match": true, "action": "skip", "latency_ms": 150},
       {"skill": "wellbeing", "match": true, "action": "check_in", "latency_ms": 150}
     ],
     "wall_ms": 150,
@@ -103,7 +103,7 @@ def _classify(transcript: str) -> tuple[list[str], float]:
 
 
 def _tool_call_to_result(tool_name: str, latency_ms: float) -> dict[str, Any]:
-    """Convert a tool call name like 'music.skip' to a backward-compatible result."""
+    """Convert a tool call name like 'accommodator.skip' to a backward-compatible result."""
     parts = tool_name.split(".", 1)
     if len(parts) == 2:
         skill, action = parts

@@ -69,7 +69,7 @@ export class SkillRegistry {
   /**
    * Query the current state of all skills that expose getState().
    * Returns a formatted string for the router prompt, e.g.:
-   *   music: status=playing, track=Song by Artist
+   *   accommodator: status=matching, quadrant=calm
    */
   async buildStateContext(): Promise<string> {
     const lines: string[] = [];

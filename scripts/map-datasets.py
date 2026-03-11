@@ -4,10 +4,11 @@ Map downloaded public datasets to the multi-tool classifier's training format.
 Reads CLINC-OOS, MASSIVE, Banking77, and Snips datasets and maps their labels
 to the new accommodator-based tool schema:
 
-  - wellbeing.check_in       (kept — core safety skill)
-  - accommodator.activate    (user wants mood-adaptive music/environment)
-  - accommodator.deactivate  (user wants to stop mood accommodation)
-  - accommodator.set_target  (user explicitly states desired mood)
+   - wellbeing.check_in       (kept — core safety skill)
+   - accommodator.activate    (user wants mood-adaptive music/environment)
+   - accommodator.skip        (user wants to skip/next track)
+   - accommodator.deactivate  (user wants to stop mood accommodation)
+   - accommodator.set_target  (user explicitly states desired mood/preference)
 
 Old music.* tools are REMOVED as direct classifier targets. Music control
 becomes internal to the Accommodator.
@@ -78,6 +79,18 @@ NEW_TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "accommodator.skip",
+            "description": (
+                "User wants to skip the current track without stopping or "
+                "restarting the mood system. Covers: 'skip this song', "
+                "'next track', 'play the next one'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "accommodator.deactivate",
             "description": (
                 "User wants to stop mood accommodation. Covers requests to stop, "
@@ -93,7 +106,7 @@ NEW_TOOL_DEFINITIONS = [
             "description": (
                 "User explicitly states a desired mood or preference. "
                 "Examples: 'I want to feel calm', 'help me focus', 'I like rock music', "
-                "'something upbeat please'."
+                "'something upbeat please'. NOT for song info queries or playback control."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -162,10 +175,12 @@ def make_entry(transcript: str, tool_calls: list[str]) -> dict:
 
 def map_clinc_label(label: str) -> list[str] | None:
     """Map CLINC-OOS label to our tool schema."""
-    if label in ("play_music", "next_song"):
+    if label == "play_music":
         return ["accommodator.activate"]
+    if label == "next_song":
+        return ["accommodator.skip"]  # Fixed: was incorrectly mapped to activate
     if label == "previous_song":
-        return ["accommodator.activate"]
+        return ["accommodator.skip"]  # Track navigation = skip
     if label == "change_volume":
         return None  # SKIP — internal to accommodator
     if label == "oos":
@@ -181,9 +196,10 @@ def map_massive_label(label: str) -> list[str] | None:
     if label in ("audio_volume_up", "audio_volume_down", "audio_volume_mute",
                  "audio_volume_other"):
         return None  # SKIP — internal to accommodator
-    if label in ("music_query", "music_settings", "music_likeness",
-                 "music_dislikeness"):
-        return ["accommodator.set_target"]
+    if label in ("music_query", "music_settings"):
+        return None  # SKIP — info queries and playback control, not mood targets
+    if label in ("music_likeness", "music_dislikeness"):
+        return ["accommodator.set_target"]  # Preference statements are valid targets
     # Everything else -> NEGATIVE
     return []
 
@@ -498,8 +514,9 @@ def compute_final_stats(
 def main() -> None:
     print(f"\n{'=' * 70}")
     print("Mapping public datasets to multi-tool training format")
-    print(f"  Tool schema: accommodator.activate, accommodator.deactivate,")
-    print(f"               accommodator.set_target, wellbeing.check_in")
+    print(f"  Tool schema: accommodator.activate, accommodator.skip,")
+    print(f"               accommodator.deactivate, accommodator.set_target,")
+    print(f"               wellbeing.check_in")
     print(f"{'=' * 70}\n")
 
     # 1. Process all datasets
