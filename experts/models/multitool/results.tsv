@@ -6,3 +6,4 @@ timestamp	run_id	iters	lr	lora_rank	lora_layers	accuracy	exact	total	elapsed_s	s
 20260310-211426	20260310-211426	150	5e-05	16	12	0.7941	54	68	551	keep	exercise 1: deactivate data, 150 iters
 20260310-213356	20260310-213356	150	5e-05	16	12	0.6471	44	68	617	discard	exercise 2: wellbeing +22 pos (giving-up/loneliness/anxiety/grief/hopelessness), +13 hard neg
 20260310-214439	20260310-214439	250	5e-05	16	12	0.8382	57	68	828	keep	exercise 2: wellbeing data, 250 iters (convergence test)
+20260310-220024	20260310-220024	250	5e-05	16	12	0.8676	59	68	783	keep	exercise 3: set_target +22 volume, +4 mood, +4 pref, +10 hard neg

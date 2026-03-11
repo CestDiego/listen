@@ -346,6 +346,17 @@ REAL_LOG_NEGATIVES: list[str] = [
     "I'll skip dessert tonight",
     "we should skip the next sprint review",
     "skip the boring parts",
+    # ── Exercise #3: Hard negatives for "volume/turn up/turn down" (NOT set_target) ──
+    "turn up the heat, it's freezing in here",
+    "turn down the thermostat",
+    "can you turn up the brightness on the screen",
+    "turn down the lights for the movie",
+    "the volume of work has been insane lately",
+    "turn it around and look at the back",
+    "I need to focus on this report",
+    "I want to feel better about my presentation",
+    "I'm in the mood for pizza",
+    "I need something from the store",
 ]
 
 
@@ -422,6 +433,7 @@ ACCOMMODATOR_POSITIVES: dict[str, list[str]] = {
         "mute the music, I'm in a meeting now",
     ],
     "set_target": [
+        # ── mood target ──
         "I want to feel calm",
         "help me focus",
         "I need something upbeat",
@@ -434,6 +446,41 @@ ACCOMMODATOR_POSITIVES: dict[str, list[str]] = {
         "play something happy",
         "I want peaceful vibes",
         "something to help me study",
+        "I need something mellow right now",
+        "make it more chill",
+        "I want something intense",
+        "switch to something more uplifting",
+        # ── volume control ──
+        "turn it up",
+        "turn it up a bit",
+        "turn it down",
+        "turn it down a little",
+        "louder please",
+        "louder",
+        "quieter please",
+        "quieter",
+        "volume up",
+        "volume down",
+        "pump up the volume",
+        "set volume to 100 percent",
+        "set the volume to 50",
+        "turn the volume up",
+        "turn the volume down",
+        "make it louder",
+        "make it quieter",
+        "can you turn it up a notch",
+        "lower the volume a bit",
+        "raise the volume",
+        "crank it up",
+        "bring the volume down",
+        "it's too quiet, turn it up",
+        "it's too loud, turn it down",
+        "volume down please, it's too loud",
+        # ── rating / preference ──
+        "I love this song, remember that",
+        "this is a great track, save it",
+        "I don't like this kind of music",
+        "more songs like this one please",
     ],
 }
 
