@@ -205,6 +205,34 @@ EXTRA_WELLBEING_POSITIVES: list[str] = [
     # First-person with "stop everything" pattern (ambiguous with accommodator.deactivate)
     "I just want to stop existing sometimes",
     "I need everything to just stop, I can't keep going like this",
+    # ── Exercise #2: giving up (was 4 examples, need more) ──
+    "what's the point of even trying anymore",
+    "I should just quit everything and disappear",
+    "I'm done trying, nothing ever works out for me",
+    "there's no point in continuing, I'll just fail again",
+    "I give up, I can't keep pretending things will get better",
+    # ── Exercise #2: loneliness (was 1 example) ──
+    "nobody understands what I'm going through",
+    "I have no one to talk to about any of this",
+    "I feel so isolated, like nobody even notices me",
+    "everyone has someone except me, I'm completely alone",
+    "I could disappear and nobody would even notice",
+    # ── Exercise #2: anxiety / panic (was 0 examples) ──
+    "I'm having a panic attack, I can't breathe",
+    "my anxiety is through the roof right now",
+    "I can't stop shaking, I'm so anxious about everything",
+    "my heart is racing and I feel like something terrible is about to happen",
+    "I'm spiraling, the anxiety won't stop",
+    # ── Exercise #2: grief / loss (was 0 examples) ──
+    "I miss them so much it physically hurts",
+    "I can't stop thinking about losing them, it's destroying me",
+    "everything reminds me of them and I just break down",
+    "the grief is eating me alive, I don't know how to cope",
+    # ── Exercise #2: hopelessness (was 0 examples) ──
+    "nothing will ever get better, I just know it",
+    "there's no way out of this, I'm trapped",
+    "I've tried everything and nothing works, what's the point",
+    "the future looks completely dark, I can't see any hope",
 ]
 
 
@@ -257,6 +285,23 @@ REAL_LOG_NEGATIVES: list[str] = [
     "she kept saying I'm worthless over and over in the play",
     "the song goes I'm such a failure, it's really catchy actually",
     "he read aloud from the book, I can't do anything right, and then closed it",
+    # ── Exercise #2: hard negatives for new wellbeing patterns ──
+    # Anxiety/panic in third person or past tense (NOT first-person distress)
+    "she was having a panic attack at the office yesterday",
+    "he told me his anxiety has been really bad lately",
+    "the article talks about how anxiety affects productivity",
+    "my friend had a panic attack during the presentation",
+    # Grief/loss in third person or reported (NOT first-person distress)
+    "she's been grieving since the funeral last month",
+    "he said he misses his grandmother every day",
+    "the movie was about a woman dealing with grief after losing her husband",
+    # Loneliness/isolation in third person (NOT first-person distress)
+    "he mentioned feeling lonely since moving to the new city",
+    "the study found that remote workers feel more isolated",
+    # Giving up in casual/non-distress context (NOT wellbeing)
+    "I'm giving up on trying to fix this printer, let's just buy a new one",
+    "I give up trying to find parking, let's take the bus",
+    "I'm done trying to explain this, let's move on to the next topic",
     # Action-sounding phrases that are NOT music commands
     "let me share my screen for a second",
     "go ahead and start the presentation",
@@ -274,6 +319,33 @@ REAL_LOG_NEGATIVES: list[str] = [
     "let's rewind a bit and think about this",
     "can we play devil's advocate here",
     "I need to turn this project around",
+    # ── Hard negatives for "stop/pause/quiet" (NOT deactivate) ──
+    "stop the meeting, we need to regroup",
+    "stop sending me those emails",
+    "stop overthinking it",
+    "pause on that thought for a second",
+    "let's pause the discussion and come back tomorrow",
+    "hold that thought",
+    "hold on a second, I need to check something",
+    "stop the car, I forgot my wallet",
+    "let's put a pause on the project",
+    "quiet down everyone, the speaker is starting",
+    "it's quiet in here today, where is everyone",
+    "I need some quiet time to read",
+    "can we stop talking about this",
+    "just stop, you're making it worse",
+    "the room went quiet when she walked in",
+    # ── Hard negatives for "skip" (NOT accommodator.skip) ──
+    "skip that part of the meeting",
+    "can we skip lunch today",
+    "skip the intro and get to the point",
+    "I need to skip my morning run",
+    "skip ahead in the book to chapter five",
+    "let's skip the pleasantries",
+    "skip the formalities",
+    "I'll skip dessert tonight",
+    "we should skip the next sprint review",
+    "skip the boring parts",
 ]
 
 
@@ -299,14 +371,55 @@ ACCOMMODATOR_POSITIVES: dict[str, list[str]] = {
         "change the track",
     ],
     "deactivate": [
+        # ── pause variants ──
         "stop the music please",
-        "turn off the mood music",
-        "I don't want music right now",
-        "silence please",
+        "pause the music",
+        "pause it",
+        "pause please",
+        "pause the song",
+        "hold on, pause",
+        "can you pause that",
+        "pause it for a sec",
+        "pause the music for a minute",
+        "just pause",
+        # ── stop variants ──
+        "stop the music",
+        "stop playing",
+        "stop playing music",
+        "stop it",
+        "that's enough music",
+        "enough music for now",
+        "cut the music",
+        "kill the music",
+        # ── mute / silence variants ──
         "mute everything",
-        "stop accommodating",
+        "mute the music",
+        "mute it",
+        "silence please",
+        "silence the music",
+        "shh, turn it off",
+        # ── turn off variants ──
+        "turn off the mood music",
         "turn off the background music",
+        "turn off the music",
+        "turn it off",
+        "switch off the music",
+        # ── don't want / need quiet ──
+        "I don't want music right now",
+        "no more music",
+        "no more music please",
         "I need quiet",
+        "I need silence",
+        "I need to think without music",
+        "can we have some quiet",
+        "stop accommodating",
+        "turn off the accommodator",
+        # ── contextual ──
+        "I'm getting on a call, pause the music",
+        "hold the music, someone's talking to me",
+        "stop the music, I need to focus on this call",
+        "pause, I need to answer the phone",
+        "mute the music, I'm in a meeting now",
     ],
     "set_target": [
         "I want to feel calm",

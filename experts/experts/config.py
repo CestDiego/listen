@@ -1,4 +1,9 @@
-"""Shared configuration for skill expert models."""
+"""Shared configuration for skill expert models — READ-ONLY per autoresearch convention.
+
+Contains model paths, tool definitions, and fixed constants. The agent
+should NOT modify this file. Tool definitions and base model selection
+are infrastructure decisions.
+"""
 
 from pathlib import Path
 

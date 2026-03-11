@@ -6,9 +6,9 @@
   "lora_layers": 12,
   "learning_rate": 5e-05,
   "batch_size": 2,
-  "iters": 300,
-  "train_examples": 202,
-  "valid_examples": 42,
-  "elapsed_seconds": 487.2,
-  "timestamp": "2026-03-10 14:34:47"
+  "iters": 250,
+  "train_examples": 3123,
+  "valid_examples": 389,
+  "elapsed_seconds": 800.9,
+  "timestamp": "2026-03-10 21:58:00"
 }

@@ -1,0 +1,15 @@
+{
+  "accuracy": 0.5,
+  "exact": 34,
+  "total": 68,
+  "timestamp": "2026-03-10T20:34:08.722478",
+  "tool_tp": {},
+  "tool_fp": {},
+  "tool_fn": {
+    "accommodator.activate": 10,
+    "accommodator.skip": 4,
+    "accommodator.deactivate": 4,
+    "accommodator.set_target": 4,
+    "wellbeing.check_in": 16
+  }
+}

@@ -1,5 +1,10 @@
 """
-Multi-tool model evaluation — parse <tool_call> blocks, compare to expected.
+Multi-tool model evaluation — READ-ONLY per autoresearch convention.
+
+This file contains the IMMUTABLE evaluation function. DO NOT MODIFY.
+The single metric (exact-match accuracy) must remain fixed so that
+experiments are fairly comparable. If you change the eval, all past
+results become meaningless.
 
 Metrics:
   - Exact match accuracy (predicted tool set == expected tool set)

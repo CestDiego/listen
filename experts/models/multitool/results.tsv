@@ -1,0 +1,8 @@
+timestamp	run_id	iters	lr	lora_rank	lora_layers	accuracy	exact	total	elapsed_s	status	note
+20260310-203342	20260310-203342	0	0	0	0	0.5000	34	68	26	baseline	baseline eval
+20260310-203416	20260310-203416	50	5e-05	16	12	0.8235	56	68	26	eval-only	iter 450 checkpoint, corrected data
+20260310-203455	20260310-203455	50	5e-05	16	12	0.7647	52	68	265	keep	50-iter test of full loop
+20260310-210137	20260310-210137	50	5e-05	16	12	0.6029	41	68	257	discard	exercise 1: deactivate +37 pos, +25 hard neg
+20260310-211426	20260310-211426	150	5e-05	16	12	0.7941	54	68	551	keep	exercise 1: deactivate data, 150 iters
+20260310-213356	20260310-213356	150	5e-05	16	12	0.6471	44	68	617	discard	exercise 2: wellbeing +22 pos (giving-up/loneliness/anxiety/grief/hopelessness), +13 hard neg
+20260310-214439	20260310-214439	250	5e-05	16	12	0.8382	57	68	828	keep	exercise 2: wellbeing data, 250 iters (convergence test)
