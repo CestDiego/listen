@@ -20,7 +20,7 @@ Quick reference for the `listen` project — a live user state observability CLI
 ## Dimensions (6-axis intent vector)
 | Dimension | Range | Source | Half-Life |
 |-----------|-------|--------|-----------|
-| music | [0,1] | classifier | 45s |
+| accommodator | [0,1] | classifier | 45s |
 | wellbeing | [0,1] | classifier | 120s |
 | engagement | [0,1] | computed (chunk density) | 60s |
 | taskFocus | [0,1] | computed (match ratio) | 30s |
@@ -30,10 +30,11 @@ Quick reference for the `listen` project — a live user state observability CLI
 ## Research
 - `.knowledge/intent-vectors.md` — Continuous intent tracking approaches (EMA embeddings, structured vectors, DST, steering vectors, online learning)
 - `.knowledge/datasets.md` — Public datasets for Phase 3 training (70+ datasets across mood, wellbeing, energy, engagement, intent classification)
+- `.knowledge/competitive-analysis.md` — External tool landscape notes (Parakeet, RCLI) and adoption recommendations
 
 ## Search Keywords
 `mlx`, `qwen`, `lora`, `fine-tuning`, `skill router`, `moonshine`, `transcription`,
-`music skill`, `wellbeing skill`, `apple music`, `elevenlabs`, `eval`, `expert models`,
+`accommodator skill`, `wellbeing skill`, `afplay`, `elevenlabs`, `eval`, `expert models`,
 `intent vector`, `intent tracking`, `user state`, `steering vectors`, `dialogue state`,
 `dimension`, `mood`, `energy`, `engagement`, `activation gate`, `hysteresis`,
 `CLINC150`, `MASSIVE`, `GoEmotions`, `EmoBank`, `NRC VAD`, `sentiment`, `arousal`

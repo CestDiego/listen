@@ -136,6 +136,7 @@ DUAL_TEMPLATES: list[dict[str, Any]] = [
      "tools": ["accommodator.skip", "wellbeing.check_in"]},
     {"transcript": "skip this garbage, I'm the worst for picking this playlist",
      "tools": ["accommodator.skip", "wellbeing.check_in"]},
+    # (Exercise #5 attempts discarded — dual additions regress single-tool accuracy)
     # ── deactivate + wellbeing (was: pause + wellbeing) ──
     {"transcript": "pause the music, I need a break, I'm burning out",
      "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
@@ -153,6 +154,7 @@ DUAL_TEMPLATES: list[dict[str, Any]] = [
      "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
     {"transcript": "mute the music, I'm drowning in work and I hate myself",
      "tools": ["accommodator.deactivate", "wellbeing.check_in"]},
+    # (Exercise #5 attempts discarded — dual additions regress single-tool accuracy)
     # ── activate + wellbeing (was: play + wellbeing) ──
     {"transcript": "play something calming, I'm having a terrible day and I hate myself",
      "tools": ["accommodator.activate", "wellbeing.check_in"]},
@@ -233,6 +235,11 @@ EXTRA_WELLBEING_POSITIVES: list[str] = [
     "there's no way out of this, I'm trapped",
     "I've tried everything and nothing works, what's the point",
     "the future looks completely dark, I can't see any hope",
+    # ── Exercise #4: imposter syndrome reinforcement ──
+    "they're going to find out I'm a fraud, I don't belong here",
+    "everyone is going to realize I don't know what I'm doing",
+    "I'm just waiting for the day they figure out I'm incompetent",
+    "I feel like such a fraud, I don't deserve any of this",
 ]
 
 
@@ -371,6 +378,24 @@ ACCOMMODATOR_POSITIVES: dict[str, list[str]] = {
         "I want some background music",
         "turn on the accommodator",
         "start listening to my mood",
+        # ── Exercise #4: resume/unpause (confused with deactivate) ──
+        "unpause the music",
+        "unpause it",
+        "unpause please",
+        "resume the music",
+        "resume playing",
+        "resume playback",
+        "bring the music back",
+        "continue the music",
+        "continue playing please",
+        "start the music again",
+        "put the music back on",
+        "turn the music back on",
+        # ── Exercise #4: focus/concentration (confused with set_target) ──
+        "help me focus please",
+        "help me concentrate",
+        "I need focus music",
+        "play something for focus",
     ],
     "skip": [
         "skip this song",

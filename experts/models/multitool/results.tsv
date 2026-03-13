@@ -7,3 +7,10 @@ timestamp	run_id	iters	lr	lora_rank	lora_layers	accuracy	exact	total	elapsed_s	s
 20260310-213356	20260310-213356	150	5e-05	16	12	0.6471	44	68	617	discard	exercise 2: wellbeing +22 pos (giving-up/loneliness/anxiety/grief/hopelessness), +13 hard neg
 20260310-214439	20260310-214439	250	5e-05	16	12	0.8382	57	68	828	keep	exercise 2: wellbeing data, 250 iters (convergence test)
 20260310-220024	20260310-220024	250	5e-05	16	12	0.8676	59	68	783	keep	exercise 3: set_target +22 volume, +4 mood, +4 pref, +10 hard neg
+20260310-221442	20260310-221442	250	5e-05	16	12	0.8824	60	68	776	keep	exercise 4: activate +16 resume/focus, wellbeing +4 imposter
+20260310-223050	20260310-223050	50	5e-05	16	12	0.8824	60	68	26	eval-only	pre-exercise-5 check
+20260310-223322	20260310-223322	250	5e-05	16	12	0.8235	56	68	820	discard	exercise 5: dual +22, FP cleanup +24 hard neg, volume% +10, focus +6, unpause +8
+20260310-224837	20260310-224837	250	5e-05	16	12	0.8088	55	68	847	discard	exercise 5b: dual-only +16 (8 skip+wb, 8 deact+wb)
+20260310-230346	20260310-230346	250	5e-05	16	12	0.7794	53	68	821	discard	exercise 5c: dual +8 balanced with +8 hard neg (casual tired, dramatic speech)
+20260310-231814	20260310-231814	50	5e-05	16	12	0.7794	53	68	28	eval-only	verify exercise 4 restore
+20260310-231920	20260310-231920	50	5e-05	16	12	0.8824	60	68	27	eval-only	verify best adapter restored (88.2%)
